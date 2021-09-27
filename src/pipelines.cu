@@ -489,8 +489,8 @@ int main(int argc, char * argv[]){
 		}
 		se.warmup_schedule(zerothLayer);
 		printf("Warming up code copleted here executed\n");
-		tinyYolov1.cur_prefetch_layer = 0;
-		fseek(tinyYolov1.wfp, 0, SEEK_SET);
+		tinyYolov2.cur_prefetch_layer = 0;
+		fseek(tinyYolov2.wfp, 0, SEEK_SET);
 		destroyLinearDAG(&zerothLayer);
 	}
 	//warmup code ends here
