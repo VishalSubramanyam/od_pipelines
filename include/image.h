@@ -110,6 +110,9 @@ void show_images(image *ims, int n, char *window);
 void show_image_layers(image p, char *name);
 void show_image_collapsed(image p, char *name);
 
+
+void draw_detections(image im, detection *dets, int num, float thresh, char **names, image **alphabet, int classes);
+image **load_alphabet();
 void print_image(image m);
 
 image make_empty_image(int w, int h, int c);

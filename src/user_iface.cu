@@ -55,6 +55,15 @@ void SoftmaxDescriptor::initializeValues(SoftmaxAlgorithm algo, SoftmaxMode mode
 	this->w = w;
 }
 
+void RegionDescriptor::initializeValues(int channels,int w, int h, int num, int classes, int coords){
+	this->channels=channels;
+	this->w=w;
+	this->h=h;
+	this->num=num;
+	this->classes=classes;
+	this->coords=coords;
+}
+
 void LayerSpecifier::initPointer(LayerOp type) {
 	this->type = type;
 	if (type == CONV)
@@ -71,6 +80,8 @@ void LayerSpecifier::initPointer(LayerOp type) {
 		params = malloc(sizeof(ActivationDescriptor));
 	else if (type == SOFTMAX)
 		params = malloc(sizeof(SoftmaxDescriptor));
+	else if(type == REGION)
+		params =malloc(sizeof(RegionDescriptor));
 }
 
 void LayerSpecifier::freePointer() {

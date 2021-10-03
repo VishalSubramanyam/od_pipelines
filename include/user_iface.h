@@ -3,7 +3,7 @@
 #ifndef USER_IFACE
 #define USER_IFACE
 
-enum LayerOp {CONV, FULLY_CONNECTED, BATCHNORM, DROPOUT, POOLING, ACTV, SOFTMAX, CROSS_ENTROPY, SVM};
+enum LayerOp {CONV, FULLY_CONNECTED, BATCHNORM, DROPOUT, POOLING, ACTV, SOFTMAX, CROSS_ENTROPY, SVM,REGION};
 enum SoftmaxAlgorithm {SOFTMAX_FAST, SOFTMAX_ACCURATE};
 enum SoftmaxMode {SOFTMAX_MODE_INSTANCE, SOFTMAX_MODE_CHANNEL};
 enum DataType {DATA_FLOAT, DATA_DOUBLE};
@@ -74,6 +74,11 @@ struct SoftmaxDescriptor {
 	SoftmaxMode mode;
 
 	void initializeValues(SoftmaxAlgorithm algo, SoftmaxMode mode, int channels, int h, int w);
+};
+
+struct RegionDescriptor{
+	int channels,w,h,num,classes, coords;
+	void initializeValues(int channels, int w, int h, int num, int classes, int coords);
 };
 
 struct LayerSpecifier {

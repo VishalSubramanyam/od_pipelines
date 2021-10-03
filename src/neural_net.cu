@@ -210,6 +210,12 @@ NeuralNet::NeuralNet(std::vector<LayerSpecifier> &layers, DataType data_type, in
 			((SoftmaxLayerParams *)params[i])->initializeValues(user_params, this->data_type, this->tensor_format,batch_size, current_output_size);
 			// std::cout << current_output_size.N << ' ' << current_output_size.C << current_output_size.H << current_output_size.W << std::endl;
 		}
+		else if(layers[i].type == REGION){		//block for region layer
+			RegionDescriptor *user_params = (RegionDescriptor *) layers[i].params;
+			params[i] = malloc(sizeof(RegionLayerParams));
+			//printf("NN constr:REGION batch size %d", batch_size);
+			((RegionLayerParams *)params[i])->initializeValues(user_params,batch_size, current_output_size);
+		}
 		if (i == 0) {
 			prev_output_size = current_output_size;
 		}
@@ -312,7 +318,16 @@ NeuralNet::NeuralNet(std::vector<LayerSpecifier> &layers, DataType data_type, in
 				num_classes = user_params->channels;
 			}
 		}
-
+		else if(layers[i].type == REGION){//updated code
+			RegionDescriptor *user_params = (RegionDescriptor *)layers[i].params;
+			//((SoftmaxLayerParams *)params[i])->allocateSpace(free_bytes);
+			input_size = batch_size * user_params->channels * user_params->h * user_params->w;
+			if (i == num_layers - 1) {
+				num_classes = user_params->channels;
+				layer_input_size[i+1]= user_params->h * user_params->w * user_params->num *(user_params->classes + user_params->coords +1);
+				//printf("\n\n\n%d layer is REGION layer and its size is %d\n\n\n",i, layer_input_size[i+1]);
+			}
+		}
 		// do not allocate memory initially
 		// checkCudaErrors(cudaMalloc(&layer_input[i], input_size * data_type_size));
 		// checkCudaErrors(cudaMalloc(&dlayer_input[i], input_size * data_type_size));
@@ -485,18 +500,16 @@ void NeuralNet::deallocateSpace(){
 	}	
 	fclose(wfp);
 }
-void NeuralNet::loadFile( char *imgfname){ 
+void NeuralNet::loadFile(char *imgfname, cudaStream_t &stream){ 
 	//intialize first layer of the neural network with the input image
-	image im = load_image_color(imgfname, 0, 0);
+	im = load_image_color(imgfname, 0, 0);
 	//size? net->w in yolo
+	img_h=im.h;
+	img_w=im.w;
+	printf("Loading image %s of size %d %d ",imgfname, input_w, input_h);
 	image r = letterbox_image(im, input_w,input_h );
-	//resize_network(net, resized.w, resized.h);
-	//--show_image(im,"orig",5);
-	//--show_image(r,"letterimg",5);
-	//copy image data into layer_input[0]
-	//memcpy(&(nm->layer_input[i]),r.data,nm->layer_input_size[i]*nm->data_type_size);
-       //		space_tracker.updateSpace(CnmemSpace::SUB, nm->layer_input_size[0] * nm->data_type_size);
-	checkCudaErrors(cudaMemcpy(layer_input[0], r.data, batch_size *input_channels * input_h *input_w * data_type_size, cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpyAsync(layer_input[0], r.data, batch_size *input_channels * input_h *input_w * data_type_size, cudaMemcpyHostToDevice, stream));
+	printf("Loading image operation enqued in memory stream\n");
 }
 
 bool NeuralNet::simulateNeuralNetworkMemory(vDNNConvAlgoPref algo_pref, bool hard, size_t &exp_max_consume, size_t &max_consume) {

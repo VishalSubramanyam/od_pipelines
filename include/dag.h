@@ -1,8 +1,8 @@
-#ifndef DAG_H
-#define DAG_H
-#include "neural_net.h"
+#include <neural_net.h>
 #include <string>
 #include <vector>
+#ifndef DAG_H
+#define DAG_H
 using namespace std;
 struct Operation {
   public:

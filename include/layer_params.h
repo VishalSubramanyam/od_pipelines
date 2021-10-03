@@ -174,6 +174,15 @@ struct SoftmaxLayerParams {
 	void allocateSpace(size_t &free_bytes);
 };
 
-
+struct RegionLayerParams{
+	int batch_size;
+	int channels;
+	int width;
+	int height;
+	int classes;
+	int num;
+	int coords;
+	void initializeValues(RegionDescriptor *user_params, int batch_size, LayerDimension &output_size);
+};
 
 #endif

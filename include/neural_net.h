@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include "image.h"
 
 #include <cudnn.h>
 #include <cublas_v2.h>
@@ -38,6 +39,8 @@ public:
 	float softmax_eps;
 	void *one_vec;
 	float init_std_dev;
+	int img_h,img_w;
+	image im;//for input image
 
 	std::vector<LayerOp> layer_type;
 	int num_layers;
@@ -120,7 +123,7 @@ public:
 //--	void setOffload(OffloadType offload_type);
 //--	void resetPrefetched();
 
-	void loadFile( char *imgfname);
+	void loadFile(char *imgfname, cudaStream_t &stream);
 	void deallocateSpace();
 	void prefetchWeights(int layer_no, cudaStream_t &memory_stream);
 };

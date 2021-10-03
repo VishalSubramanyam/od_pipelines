@@ -803,3 +803,16 @@ void SoftmaxLayerParams::initializeValues(SoftmaxDescriptor *user_params, cudnnD
 void SoftmaxLayerParams::allocateSpace(size_t &free_bytes) {
 
 }
+void RegionLayerParams::initializeValues(RegionDescriptor *user_params, int batch_sz, LayerDimension &output_size){
+	batch_size=batch_sz;
+	channels=user_params->channels;
+	height=user_params->h;
+	width=user_params->w;
+	num=user_params->num;
+	classes=user_params->classes;
+	coords=user_params->coords;
+	//printf("\nIn REGION layer- initialise layer parameter.cu file\n ");
+	//printf("Init valuues in param : batch is %d", batch_size);
+	//printf("REGION layer: %d %d %d %d %d\n", user_params->channels, user_params->h, user_params->w, user_params->num, user_params->classes);
+	output_size.N = batch_sz, output_size.C = user_params->channels, output_size.H = user_params->h, output_size.W = user_params->w;	
+}

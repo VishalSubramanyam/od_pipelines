@@ -19,13 +19,13 @@ using namespace std;
 #ifndef SCHEDULEENGINE_H
 #define SCHEDULEENGINE_H
 
-struct ComparePriority
+/* struct ComparePriority
 {
 	bool operator()(Operation *const &op1, Operation *const &op2)
 	{
 		return op1->priority > op2->priority;
 	}
-};
+}; */
 
 class ScheduleEngine
 {
@@ -37,8 +37,9 @@ public:
 	pthread_mutex_t lock;
 	pthread_cond_t cond;
 	map<int, Operation> pipe1, pipe2;
-	priority_queue<Operation *, vector<Operation *>, ComparePriority> Q;
-	queue<Operation> timeQ;
+	//priority_queue<Operation *, vector<Operation *>, ComparePriority> Q;
+	queue<Operation *> Q;
+	queue<Operation *> timeQ;
 	enum stream_indicator
 	{
 		HIGH_COMPUTE_STREAM,
@@ -55,7 +56,7 @@ public:
 	void execute(Operation *, stream_indicator);
 	void schedule();
 	void warmup_schedule(InputOperation *zerothLayer);
-	void schedule_sequential(NeuralNet *nm);
+	void schedule_sequential(InputOperation *nm, FILE *fpcf);
 	ScheduleEngine();
 	void initMutex();
 	void destroyMutex();
@@ -64,7 +65,9 @@ public:
 	NeuralNet *create_ALEXnet();
 	NeuralNet *create_VGGnet();
 	void startPrefetchWeights(NeuralNet *, int, cudaStream_t &);
-	void schedule_profile(vector<Operation> &, vector<Operation> &);
+	void schedule_profile(vector<Operation *> &, vector<Operation *> &);
 	void createGlobalEvent(void);
+	void destroyGlobalEvents(void);
+
 };
 #endif
