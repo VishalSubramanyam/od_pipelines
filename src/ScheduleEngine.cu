@@ -641,17 +641,6 @@ void ScheduleEngine::startPrefetchWeights(NeuralNet *nm, int nos_layers_to_prefe
 	}
 }
 
-void fillExecutionTime(ifstream &fp, vector<InputOperation *> dags){
-	for(auto &input_operation : dags)
-	{
-		Operation *tp = input_operation;
-		while(tp != nullptr){
-			fp >> tp->time_to_start;
-			fp >> tp->time_to_execute;
-			tp = tp->children.back();
-		}
-	}
-}
 
 void ScheduleEngine::schedule_profile(InputOperation *z1, InputOperation *z2, vector<Operation *> &p1, vector<Operation *> &p2)
 {
@@ -664,7 +653,7 @@ void ScheduleEngine::schedule_profile(InputOperation *z1, InputOperation *z2, ve
 	fillExecutionTime(fp, {z1, z2});
 	fp.close();
 
-	cofp = fopen("coSched.txt", "w");
+	cofp = fopen("output/coSched.txt", "w");
 	cudaEvent_t global_start;
 	cudaEventCreate(&global_start);
 	cudaEventRecord(global_start);
@@ -676,6 +665,7 @@ void ScheduleEngine::schedule_profile(InputOperation *z1, InputOperation *z2, ve
 	startPrefetchWeights(z2->model, z2->model->num_layers, memoryStream);
 	//wait for the completion of trasfer of weights
 	cudaStreamSynchronize(memoryStream);
+	cout << "\nFinished prefetching in schedule_profile()" << endl;
 
 	cudaEvent_t start,end;
 
@@ -710,7 +700,7 @@ void ScheduleEngine::schedule_profile(InputOperation *z1, InputOperation *z2, ve
 				fprintf(cofp,"NS    ");
 			*/
 
-			if (per < 0.2)
+			if (per < 0.6)
 				fprintf(cofp, "1 ");
 			else
 				fprintf(cofp, "0 ");
@@ -753,7 +743,7 @@ void ScheduleEngine::schedule_profile(InputOperation *z1, InputOperation *z2, ve
 				fprintf(cofp,"NS    ");
 			*/
 
-			if (per < 0.2)
+			if (per < 0.6)
 				fprintf(cofp, "1 ");
 			else
 				fprintf(cofp, "0 ");
