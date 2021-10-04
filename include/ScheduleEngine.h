@@ -66,7 +66,6 @@ public:
 	NeuralNet *create_VGGnet();
 	void startPrefetchWeights(NeuralNet *, int, cudaStream_t &);
 	void schedule_profile(InputOperation *, InputOperation *, vector<Operation *> &, vector<Operation *> &);
-	void schedule_profile1(InputOperation *, InputOperation *, vector<Operation *> &, vector<Operation *> &);
 	void createGlobalEvent(void);
 	void destroyGlobalEvents(void);
 };

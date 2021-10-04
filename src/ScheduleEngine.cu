@@ -29,8 +29,8 @@ ScheduleEngine::ScheduleEngine()
 	int leastPriority, greatestPriority;
 	checkCudaErrors(cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
 
-	checkCudaErrors(cudaStreamCreateWithPriority(&compute_streams[HIGH_COMPUTE_STREAM], cudaStreamNonBlocking, greatestPriority));
-	checkCudaErrors(cudaStreamCreateWithPriority(&compute_streams[LOW_COMPUTE_STREAM], cudaStreamNonBlocking, leastPriority));
+	checkCudaErrors(cudaStreamCreateWithPriority(&compute_streams[HIGH_COMPUTE_STREAM], cudaStreamDefault, greatestPriority));
+	checkCudaErrors(cudaStreamCreateWithPriority(&compute_streams[LOW_COMPUTE_STREAM], cudaStreamDefault, leastPriority));
 	checkCudaErrors(cudaStreamCreate(&memoryStream));
 
 	checkCUDNN(cudnnCreate(&cudnnHandles[0]));
@@ -103,14 +103,14 @@ void ScheduleEngine::execute(Operation *tp, stream_indicator streamIndicator)
 		cur_workspace_size = cur_params->fwd_workspace_size;
 		nm->lockedcnmemMalloc(&cur_workspace, cur_workspace_size, compute_stream); // compute stream or memory stream?
 		// computation
-		checkCUDNN(cudnnConvolutionForward(cudnn_handle, &alpha, 
+		checkCUDNN(cudnnConvolutionForward(cudnn_handle, &alpha,
 				cur_params->input_tensor, nm->layer_input[i],
 				cur_params->filter_desc, cur_params->W,
 				cur_params->conv_desc, cur_params->fwd_algo,
 				cur_workspace, cur_workspace_size,
 				&beta,
 				cur_params->output_tensor, nm->layer_input[i + 1]));
-		 
+
 		//custom  coarsened cuda kernel
 		/* customCoarsenedConvolutionForward((float *)nm->layer_input[i], (float *)nm->layer_input[i + 1], cur_params->conv_desc, cur_params->filter_desc, cur_params->input_tensor, (float *)cur_params->W, compute_stream);
 
@@ -125,11 +125,11 @@ void ScheduleEngine::execute(Operation *tp, stream_indicator streamIndicator)
 		{
 			add_bias_gpu((float *)nm->layer_input[i + 1], (float *)cur_params->b, 1, cur_params->C_out, cur_params->output_h * cur_params->output_w, compute_stream);
 		} */
-		checkCUDNN(cudnnAddTensor(cudnn_handle, &alpha, 
-		  cur_params->bias_desc, cur_params->b, 
+		checkCUDNN(cudnnAddTensor(cudnn_handle, &alpha,
+		  cur_params->bias_desc, cur_params->b,
 		  &alpha,
 		  cur_params->output_tensor, nm->layer_input[i + 1]));
-		
+
 		// if activation required
 		if (cur_params->activation_mode != ACTIVATION_NONE)
 		{
@@ -142,7 +142,7 @@ void ScheduleEngine::execute(Operation *tp, stream_indicator streamIndicator)
 			  cur_params->output_tensor, nm->layer_input[i + 1],
 			  &beta,
 			  cur_params->output_tensor, nm->layer_input[i + 1]));
-			
+
 		}
 
 		space_tracker.updateSpace(CnmemSpace::SUB, cur_workspace_size);
@@ -253,12 +253,12 @@ void ScheduleEngine::execute(Operation *tp, stream_indicator streamIndicator)
 		RegionLayerParams *cur_params =(RegionLayerParams *)nm->params[i];
 		//printf("Batch size is %d\n", cur_params->batch_size);
 		forward_region_layer_gpu(nm->layer_input_size[i], nm->layer_input_size[i+1], (float *)nm->layer_input[i],cur_params->batch_size, cur_params->height, cur_params->width, cur_params->num,cur_params->classes,cur_params->coords,(float*)nm->layer_input[i+1], compute_stream);
-	
+
 		float *result=(float *)malloc(nm->layer_input_size[i+1]*sizeof(float));
 		checkCudaErrors(cudaMemcpy(result, nm->layer_input[i+1], nm->layer_input_size[i+1]*sizeof(float), cudaMemcpyDeviceToHost));
-	
-		//int nbox=0;	
-		//newly added block		
+
+		//int nbox=0;
+		//newly added block
     		//--detection *dets = make_network_boxes(cur_params,0.5, &nbox);
     		//--fill_network_boxes(cur_params,nm->img_w,nm->img_h, 0.5,0, dets, result, nm->layer_input_size[i+1], nm->input_w, nm->input_h);
        		 //print_detector_detections(fps, id, dets, num, classes, w, h);
@@ -387,14 +387,14 @@ void ScheduleEngine::dispatch(Operation *tp, stream_indicator streamIndicator)
 		cur_workspace_size = cur_params->fwd_workspace_size;
 		nm->lockedcnmemMalloc(&cur_workspace, cur_workspace_size, NULL);
 		// computation
-		checkCUDNN(cudnnConvolutionForward(cudnn_handle, &alpha, 
+		checkCUDNN(cudnnConvolutionForward(cudnn_handle, &alpha,
 				cur_params->input_tensor, nm->layer_input[i],
 				cur_params->filter_desc, cur_params->W,
 				cur_params->conv_desc, cur_params->fwd_algo,
 				cur_workspace, cur_workspace_size,
 				&beta,
 				cur_params->output_tensor, nm->layer_input[i + 1]));
-		
+
 		//custom  coarsened cuda kernel
 		//customCoarsenedConvolutionForward((float *)nm->layer_input[i], (float *)nm->layer_input[i + 1], cur_params->conv_desc, cur_params->filter_desc, cur_params->input_tensor, (float *)cur_params->W, compute_stream);
 
@@ -409,11 +409,11 @@ void ScheduleEngine::dispatch(Operation *tp, stream_indicator streamIndicator)
 		{
 			add_bias_gpu((float *)nm->layer_input[i + 1], (float *)cur_params->b, 1, cur_params->C_out, cur_params->output_h * cur_params->output_w, compute_stream);
 		} */
-		checkCUDNN(cudnnAddTensor(cudnn_handle, &alpha, 
-		  cur_params->bias_desc, cur_params->b, 
+		checkCUDNN(cudnnAddTensor(cudnn_handle, &alpha,
+		  cur_params->bias_desc, cur_params->b,
 		  &alpha,
 		  cur_params->output_tensor, nm->layer_input[i + 1]));
-		
+
 		// if activation required
 		if (cur_params->activation_mode != ACTIVATION_NONE)
 		{
@@ -537,12 +537,12 @@ void ScheduleEngine::dispatch(Operation *tp, stream_indicator streamIndicator)
 		RegionLayerParams *cur_params =(RegionLayerParams *)nm->params[i];
 		//printf("Batch size is %d\n", cur_params->batch_size);
 		forward_region_layer_gpu(nm->layer_input_size[i], nm->layer_input_size[i+1], (float *)nm->layer_input[i],cur_params->batch_size, cur_params->height, cur_params->width, cur_params->num,cur_params->classes,cur_params->coords,(float*)nm->layer_input[i+1], compute_stream);
-	
+
 		float *result=(float *)malloc(nm->layer_input_size[i+1]*sizeof(float));
 		checkCudaErrors(cudaMemcpy(result, nm->layer_input[i+1], nm->layer_input_size[i+1]*sizeof(float), cudaMemcpyDeviceToHost));
-	
-		//int nbox=0;	
-		//newly added block		
+
+		//int nbox=0;
+		//newly added block
     		//--detection *dets = make_network_boxes(cur_params,0.5, &nbox);
     		//--fill_network_boxes(cur_params,nm->img_w,nm->img_h, 0.5,0, dets, result, nm->layer_input_size[i+1], nm->input_w, nm->input_h);
        		 //print_detector_detections(fps, id, dets, num, classes, w, h);
@@ -641,231 +641,50 @@ void ScheduleEngine::startPrefetchWeights(NeuralNet *nm, int nos_layers_to_prefe
 	}
 }
 
-void fillExecutionTime(FILE *fp, float *at,float *et, int n){
-
-	char line[50];
-	for(int i=0;i<n;i++)
-			{
-				fgets(line,sizeof(line),fp);
-				char *t1=strtok(line," ");
-				//printf("AT %d ",atoi(at));
-				at[i]=atof(t1);
-				char *t2 = strtok(NULL, "\n");
-				//printf("ET %f ",atof(et));
-				//printf("i=%d k=%d x=%d\n",i,k,x);
-				et[i]=atof(t2);
-			}
-
+void fillExecutionTime(ifstream &fp, vector<InputOperation *> dags){
+	for(auto &input_operation : dags)
+	{
+		Operation *tp = input_operation;
+		while(tp != nullptr){
+			fp >> tp->time_to_start;
+			fp >> tp->time_to_execute;
+			tp = tp->children.back();
+		}
+	}
 }
-
-
-
-//Schedule fucntion for profiling Co-Scheduling table
 
 void ScheduleEngine::schedule_profile(InputOperation *z1, InputOperation *z2, vector<Operation *> &p1, vector<Operation *> &p2)
 {
 	int nP1 = p1.size(); //Number of compute operations in Pipeline1
 	int nP2 = p2.size(); //Number of compute operations in Pipeline2
-	FILE *cofp, *fp;
-	Operation *l1, *l2;
-	
-	float *at,*et;
-	fp=fopen("data/freship.txt","r");
-	int no_of_tasks=2;
-	int no_of_jobs_per_task[]={1,1};
-	int no_of_operations_per_job[]={45,45};
-	int entries=0;
-	int i=0,k=0;
-	while(i<no_of_tasks){
-		k=no_of_jobs_per_task[i];
-		while(k!=0) {
-			entries+=no_of_operations_per_job[i];
-			k--;
-		}
-		i++;
-	}
-	at=(float *)malloc(entries*sizeof(float));
-	et=(float *)malloc(entries*sizeof(float));
-	fillExecutionTime(fp,at,et,entries);
-	fclose(fp);
-
-	cofp = fopen("coSched.txt", "w");
-	cudaEvent_t global_start; 
-	cudaEventCreate(&global_start);
-	cudaEventRecord(global_start);
-
-	//load the input image and weight for both pipelines 
-	z1->model->loadFile(const_cast<char *>((z1->filename).c_str()), z1->model->stream_memory);
-	z2->model->loadFile(const_cast<char *>((z2->filename).c_str()), z2->model->stream_memory);
-	startPrefetchWeights(z1->model, z1->model->num_layers, z1->model->stream_memory);
-	startPrefetchWeights(z2->model, z2->model->num_layers, z2->model->stream_memory);
-	//wait for the completion of trasfer of weights
-	cudaStreamSynchronize(z1->model->stream_memory);
-	cudaStreamSynchronize(z2->model->stream_memory);
-
-
-	for (int i = 0; i < nP1; i++)
-	{
-		l1 = p1[i];
-		//fprintf(cofp,"layer %d   :",i);
-		checkCudaErrors(cudaEventCreate(&(l1->startop)));
-		checkCudaErrors(cudaEventCreate(&(l1->endop)));
-		//fprintf(cofp,"layer %d   :",i);
-		for (int j = 0; j < nP2; j++)
-		{
-			//Layer 0 for pipeline 1 and pipline2
-			l2 = p2[j];
-			//create events
-			checkCudaErrors(cudaEventCreate(&(l2->startop)));
-			checkCudaErrors(cudaEventCreate(&(l2->endop)));
-			checkCudaErrors(cudaEventRecord(l1->startop, compute_streams[HIGH_COMPUTE_STREAM]));
-			execute(l1, HIGH_COMPUTE_STREAM);
-			checkCudaErrors(cudaEventRecord(l1->endop, compute_streams[HIGH_COMPUTE_STREAM]));
-
-			checkCudaErrors(cudaEventRecord(l2->startop, compute_streams[LOW_COMPUTE_STREAM]));
-			execute(l2, LOW_COMPUTE_STREAM);
-			checkCudaErrors(cudaEventRecord(l2->endop, compute_streams[LOW_COMPUTE_STREAM]));
-
-			checkCudaErrors(cudaEventSynchronize(l1->startop));
-			checkCudaErrors(cudaEventElapsedTime(&(l1->time_to_start), global_start, l1->startop));
-			checkCudaErrors(cudaEventSynchronize(l1->endop));
-			cudaEventElapsedTime(&(l1->time_to_execute), l1->startop,l1->endop);
-
-			checkCudaErrors(cudaEventSynchronize(l2->startop));
-			checkCudaErrors(cudaEventElapsedTime(&(l2->time_to_start), global_start, l2->startop));
-			checkCudaErrors(cudaEventSynchronize(l2->endop));
-			cudaEventElapsedTime(&(l2->time_to_execute), l2->startop,l2->endop);
-			
-			float per = ((l1->time_to_execute+l2->time_to_execute)/(et[(l1->op_layer-1)*2+2]+et[(l1->op_layer-1)*2+2]))*100; 
-
-			/*if(per > 0)
-				fprintf(cofp,"S(%d) ",per);
-			else 
-				fprintf(cofp,"NS    ");
-			*/
-	
-			if (per > 70)
-				fprintf(cofp, "1 ");
-			else
-				fprintf(cofp, "0 ");
-
-			checkCudaErrors(cudaStreamSynchronize(compute_streams[HIGH_COMPUTE_STREAM]));
-			checkCudaErrors(cudaStreamSynchronize(compute_streams[LOW_COMPUTE_STREAM]));
-			checkCudaErrors(cudaEventDestroy(l2->startop));
-			checkCudaErrors(cudaEventDestroy(l2->endop));
-		}
-		fprintf(cofp, "\n");
-		checkCudaErrors(cudaEventDestroy(l1->startop));
-		checkCudaErrors(cudaEventDestroy(l1->endop));
-	}
-
-	for (int i = 0; i < nP1; i++)
-	{
-		l1 = p1[i];
-		checkCudaErrors(cudaEventCreate(&(l1->startop)));
-		checkCudaErrors(cudaEventCreate(&(l1->endop)));
-		//fprintf(cofp,"layer %d   :",i);
-		for (int j = 0; j < nP2; j++)
-		{
-			//Layer 0 for pipeline 1 and pipline2
-			l2 = p2[j];
-			//create events
-			checkCudaErrors(cudaEventCreate(&(l2->startop)));
-			checkCudaErrors(cudaEventCreate(&(l2->endop)));
-
-			checkCudaErrors(cudaEventRecord(l1->startop, compute_streams[LOW_COMPUTE_STREAM]));
-			execute(l1, LOW_COMPUTE_STREAM);
-			checkCudaErrors(cudaEventRecord(l1->endop, compute_streams[LOW_COMPUTE_STREAM]));
-
-			checkCudaErrors(cudaEventRecord(l2->startop, compute_streams[HIGH_COMPUTE_STREAM]));
-			execute(l2, HIGH_COMPUTE_STREAM);
-			checkCudaErrors(cudaEventRecord(l2->endop, compute_streams[HIGH_COMPUTE_STREAM]));
-
-			checkCudaErrors(cudaEventSynchronize(l1->startop));
-			checkCudaErrors(cudaEventElapsedTime(&(l1->time_to_start), global_start, l1->startop));
-			checkCudaErrors(cudaEventSynchronize(l1->endop));
-			cudaEventElapsedTime(&(l1->time_to_execute), l1->startop, l1->endop);
-
-			checkCudaErrors(cudaEventSynchronize(l2->startop));
-			checkCudaErrors(cudaEventElapsedTime(&(l2->time_to_start), global_start, l2->startop));
-			checkCudaErrors(cudaEventSynchronize(l2->endop));
-			cudaEventElapsedTime(&(l2->time_to_execute), l2->startop, l2->endop);
-
-			float per = ((l1->time_to_execute+l2->time_to_execute)/(et[(l1->op_layer-1)*2+2]+et[(l1->op_layer-1)*2+2]))*100; 
-
-
-			/*if(per > 0)
-				fprintf(cofp,"S(%d) ",per);
-			else 
-				fprintf(cofp,"NS    ");
-			*/
-		
-			if (per > 70)
-				fprintf(cofp, "1 ");
-			else
-				fprintf(cofp, "0 ");
-
-			checkCudaErrors(cudaStreamSynchronize(compute_streams[HIGH_COMPUTE_STREAM]));
-			checkCudaErrors(cudaStreamSynchronize(compute_streams[LOW_COMPUTE_STREAM]));
-			checkCudaErrors(cudaEventDestroy(l2->startop));
-			checkCudaErrors(cudaEventDestroy(l2->endop));
-		}
-		fprintf(cofp, "\n");
-		checkCudaErrors(cudaEventDestroy(l1->startop));
-		checkCudaErrors(cudaEventDestroy(l1->endop));
-	}
-	fclose(cofp);
-}
-
-void ScheduleEngine::schedule_profile1(InputOperation *z1, InputOperation *z2, vector<Operation *> &p1, vector<Operation *> &p2)
-{
-	int nP1 = p1.size(); //Number of compute operations in Pipeline1
-	int nP2 = p2.size(); //Number of compute operations in Pipeline2
-	FILE *cofp, *fp;
+	FILE *cofp;
+	ifstream fp("output/freship.txt");
 	Operation *l1, *l2;
 	float milliseconds = 0;
-	float *at,*et;
-	fp=fopen("data/freship.txt","r");
-	int no_of_tasks=2;
-	int no_of_jobs_per_task[]={1,1};
-	int no_of_operations_per_job[]={45,45};
-	int entries=0;
-	int i=0,k=0;
-	while(i<no_of_tasks){
-		k=no_of_jobs_per_task[i];
-		while(k!=0) {
-			entries+=no_of_operations_per_job[i];
-			k--;
-		}
-		i++;
-	}
-	at=(float *)malloc(entries*sizeof(float));
-	et=(float *)malloc(entries*sizeof(float));
-	fillExecutionTime(fp,at,et,entries);
-	fclose(fp);
+	fillExecutionTime(fp, {z1, z2});
+	fp.close();
 
 	cofp = fopen("coSched.txt", "w");
-	cudaEvent_t global_start; 
+	cudaEvent_t global_start;
 	cudaEventCreate(&global_start);
 	cudaEventRecord(global_start);
 
-	//load the input image and weight for both pipelines 
-	z1->model->loadFile(const_cast<char *>((z1->filename).c_str()), z1->model->stream_memory);
-	z2->model->loadFile(const_cast<char *>((z2->filename).c_str()), z2->model->stream_memory);
-	startPrefetchWeights(z1->model, z1->model->num_layers, z1->model->stream_memory);
-	startPrefetchWeights(z2->model, z2->model->num_layers, z2->model->stream_memory);
+	//load the input image and weight for both pipelines
+	z1->model->loadFile(const_cast<char *>((z1->filename).c_str()), memoryStream);
+	z2->model->loadFile(const_cast<char *>((z2->filename).c_str()), memoryStream);
+	startPrefetchWeights(z1->model, z1->model->num_layers, memoryStream);
+	startPrefetchWeights(z2->model, z2->model->num_layers, memoryStream);
 	//wait for the completion of trasfer of weights
-	cudaStreamSynchronize(z1->model->stream_memory);
-	cudaStreamSynchronize(z2->model->stream_memory);
+	cudaStreamSynchronize(memoryStream);
 
 	cudaEvent_t start,end;
-	
+
 
 	for (int i = 0; i < nP1; i++)
 	{
 		l1 = p1[i];
 		//fprintf(cofp,"layer %d   :",i);
-		
+
 		//fprintf(cofp,"layer %d   :",i);
 		for (int j = 0; j < nP2; j++)
 		{
@@ -880,19 +699,18 @@ void ScheduleEngine::schedule_profile1(InputOperation *z1, InputOperation *z2, v
 			execute(l2, LOW_COMPUTE_STREAM);
 			checkCudaErrors(cudaEventRecord(end));
 			checkCudaErrors(cudaEventSynchronize(end));
-			
-			milliseconds = 0;
+
 			checkCudaErrors(cudaEventElapsedTime(&milliseconds, start, end));
-			float per = ((l1->time_to_execute+l2->time_to_execute)/(et[(l1->op_layer-1)*2+2]+et[(l1->op_layer-1)*2+2]))*100; 
+			float per = (milliseconds/(l1->time_to_execute + l2->time_to_execute));
 
 
 			/*if(per > 0)
 				fprintf(cofp,"S(%d) ",per);
-			else 
+			else
 				fprintf(cofp,"NS    ");
 			*/
-	
-			if (per > 80)
+
+			if (per < 0.2)
 				fprintf(cofp, "1 ");
 			else
 				fprintf(cofp, "0 ");
@@ -905,10 +723,11 @@ void ScheduleEngine::schedule_profile1(InputOperation *z1, InputOperation *z2, v
 		}
 		fprintf(cofp, "\n");
 	}
-
 	for (int i = 0; i < nP1; i++)
 	{
 		l1 = p1[i];
+		//fprintf(cofp,"layer %d   :",i);
+
 		//fprintf(cofp,"layer %d   :",i);
 		for (int j = 0; j < nP2; j++)
 		{
@@ -922,20 +741,19 @@ void ScheduleEngine::schedule_profile1(InputOperation *z1, InputOperation *z2, v
 			execute(l1, LOW_COMPUTE_STREAM);
 			execute(l2, HIGH_COMPUTE_STREAM);
 			checkCudaErrors(cudaEventRecord(end));
-
 			checkCudaErrors(cudaEventSynchronize(end));
-			milliseconds = 0;
+
 			checkCudaErrors(cudaEventElapsedTime(&milliseconds, start, end));
-			
-			float per = ((l1->time_to_execute+l2->time_to_execute)/(et[(l1->op_layer-1)*2+2]+et[(l1->op_layer-1)*2+2]))*100; 
+			float per = (milliseconds/(l1->time_to_execute + l2->time_to_execute));
+
 
 			/*if(per > 0)
 				fprintf(cofp,"S(%d) ",per);
-			else 
+			else
 				fprintf(cofp,"NS    ");
 			*/
-		
-			if (per > 80)
+
+			if (per < 0.2)
 				fprintf(cofp, "1 ");
 			else
 				fprintf(cofp, "0 ");
@@ -959,23 +777,18 @@ void ScheduleEngine::schedule_sequential(InputOperation *zerothLayer, FILE *fpcf
 	printf("Scheduling loop started\n");
 	//FILE *fpcf = fopen("stats_mem_seq.txt","a");
 	Operation *tp = zerothLayer;
-	
+	float * dummy;
+
+	checkCudaErrors( cudaMalloc( (void**)&dummy, 100 * sizeof(float) ) );
+	checkCudaErrors( cudaFree( dummy ) );
 	while (tp != nullptr)
-	{	
+	{
 		checkCudaErrors(cudaEventCreate(&(tp->startop)));
 		checkCudaErrors(cudaEventCreate(&(tp->endop)));
 
 		if (tp->op_type == 'c')
 		{
 			assert(tp->parents.back()->op_type == 'm');
-			if (tp->op_layer == 1){
-				//wait for 0th layer memory operation
-				checkCudaErrors(cudaStreamWaitEvent(memoryStream, zerothLayer->endop, 0)); 
-				checkCudaErrors(cudaEventSynchronize(zerothLayer->startop));
-				checkCudaErrors(cudaEventElapsedTime(&(zerothLayer->time_to_start), global_start, zerothLayer->startop));
-				checkCudaErrors(cudaEventSynchronize(zerothLayer->endop));
-				checkCudaErrors(cudaEventElapsedTime(&(zerothLayer->time_to_execute), zerothLayer->startop, zerothLayer->endop));
-			}
 			checkCudaErrors(cudaStreamWaitEvent(memoryStream, tp->parents.back()->endop, 0));
 			checkCudaErrors(cudaEventSynchronize(tp->parents.back()->startop));
 			checkCudaErrors(cudaEventElapsedTime(&(tp->parents.back()->time_to_start), global_start, tp->parents.back()->startop));
@@ -987,8 +800,8 @@ void ScheduleEngine::schedule_sequential(InputOperation *zerothLayer, FILE *fpcf
 		}
 		else if (tp->op_type == 'm')
 		{
-			// if(tp->op_layer >= 2) checkCudaErrors(cudaStreamWaitEvent(compute_streams[LOW_COMPUTE_STREAM], tp->parents.back()->endop, 0));
-			// if(tp->op_layer == 1) checkCudaErrors(cudaStreamWaitEvent(memoryStream, tp->parents.back()->endop, 0));
+			if(tp->op_layer >= 2) checkCudaErrors(cudaStreamWaitEvent(compute_streams[LOW_COMPUTE_STREAM], tp->parents.back()->endop, 0));
+			if(tp->op_layer == 1) checkCudaErrors(cudaStreamWaitEvent(memoryStream, tp->parents.back()->endop, 0));
 			tp->type='M';
 			if (tp->op_layer == 0)
 			{
@@ -1015,7 +828,7 @@ void ScheduleEngine::schedule_sequential(InputOperation *zerothLayer, FILE *fpcf
 		checkCudaErrors(cudaEventElapsedTime(&(tp->time_to_start), global_start, tp->startop));
 		checkCudaErrors(cudaEventSynchronize(tp->endop));
 		checkCudaErrors(cudaEventElapsedTime(&(tp->time_to_execute), tp->startop, tp->endop));
-		
+
 		// fprintf(fpcf, "%d:%d:M:%f:%f\n", tp.pipeline, tp.op_layer * 2 + 1, tp.time_to_start_mo, tp.time_to_execute_mo);
 		if(tp->op_layer==0)
 			fprintf(fpcf, "%d:%c:%d:%c:%f:%f\n", tp->pipeline, tp->op_type, tp->op_layer, tp->type, tp->time_to_start, tp->time_to_execute);
@@ -1038,7 +851,7 @@ void ScheduleEngine::schedule()
 	cudaEvent_t global_start;
 	cudaEventCreate(&global_start);
 <<<<<<< HEAD
-	cudaEventRecord(global_start);	
+	cudaEventRecord(global_start);
 
 	//start prefetching weights of  both pipelines
 	startPrefetchWeights(model1,1);

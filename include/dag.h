@@ -11,7 +11,7 @@ struct Operation {
     int op_layer;
     int priority;
     int pipeline;
-    float time_to_start, time_to_execute;
+    float time_to_start = 0.0, time_to_execute = 0.0;
     cudaEvent_t startop, endop;
 
     vector<Operation *> parents;

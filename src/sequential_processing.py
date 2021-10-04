@@ -15,8 +15,8 @@ def isEven(y,k):
     return False
 
 #Processing input file
-file1=open('stats_mem_seq.txt','r')
-file2=open('freship1.txt','w')
+file1=open('output/stats_mem_seq.txt','r')
+file2=open('output/freship.txt','w')
 
 at_time=0
 new_at_time=0
