@@ -21,6 +21,11 @@ int pipelines = 0;
 int numOfImages = 1;
 int main(int argc, char *argv[]) {
 
+    if(argc!=6){
+        printf("Usage: build/pipeline.out data/weightfile1 data/weightfile2 images01/ images02 Program_type\n");
+        printf("Program_Type 1:Sequential scheduling 2:Coscheduling lookup table 3:LSF scheduling 4:SMT schedule execution\n");
+        exit(1);
+    }
     vDNNConvAlgo vdnn_conv_algo = vDNN_MEMORY_OPTIMAL;
     vDNNType vdnn_type = vDNN_ALL;
     int batch_size = 1;
@@ -479,14 +484,14 @@ int main(int argc, char *argv[]) {
         auto zerothLayer =
             new InputOperation("kite.jpg", &tinyYolov1, 0, 'm', 0);
         createLinearDAG(zerothLayer);
-        printf("Warm up\n");
+        printf("Starting Warm up code\n");
         Operation *currentOperation = zerothLayer;
         while (currentOperation != nullptr) {
             se.enqueue(currentOperation);
             currentOperation = currentOperation->children.back();
         }
         se.warmup_schedule(zerothLayer);
-        printf("Warming up code copleted here executed\n");
+        printf("Warming up code execution completed\n");
         tinyYolov1.cur_prefetch_layer = 0;
         fseek(tinyYolov1.wfp, 0, SEEK_SET);
         destroyLinearDAG(&zerothLayer);
@@ -495,14 +500,14 @@ int main(int argc, char *argv[]) {
         auto zerothLayer =
             new InputOperation("kite.jpg", &tinyYolov2, 0, 'm', 0);
         createLinearDAG(zerothLayer);
-        printf("Warm up\n");
+        printf("Starting Warm up code\n");
         Operation *currentOperation = zerothLayer;
         while (currentOperation != nullptr) {
             se.enqueue(currentOperation);
             currentOperation = currentOperation->children.back();
         }
         se.warmup_schedule(zerothLayer);
-        printf("Warming up code copleted here executed\n");
+        printf("Warming up code execution completed\n");
         tinyYolov2.cur_prefetch_layer = 0;
         fseek(tinyYolov2.wfp, 0, SEEK_SET);
         destroyLinearDAG(&zerothLayer);
@@ -513,6 +518,8 @@ int main(int argc, char *argv[]) {
     struct dirent *dir;
     char **list1, **list2;
     int i = 0;
+    float ms = 0;
+    float total_time = 0;
     list1 = (char **)malloc(numOfImages * sizeof(char *));
     list2 = (char **)malloc(numOfImages * sizeof(char *));
     printf("P1: %s", tinyYolov1.imgpath);
@@ -564,10 +571,10 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
     assert(strlen(argv[argc - 1]) == 1);
-    switch (atoi(argv[argc - 1])) {
+    switch (atoi(argv[argc - 1])) 
+    {
     case PROGRAM_TYPE::SEQUENTIAL:
-        float ms = 0;
-        float total_time = 0;
+      {
         cudaEvent_t start, stop;
         cudaEventCreate(&start);
         cudaEventCreate(&stop);
@@ -579,8 +586,7 @@ int main(int argc, char *argv[]) {
         for (int no = 0; no < numOfImages; no++) {
             strcpy(filename, tinyYolov1.imgpath);
             strcat(filename, list1[no]);
-            auto zerothLayer1 =
-                new InputOperation(filename, &tinyYolov1, 0, 'm', 1);
+            auto zerothLayer1 = new InputOperation(filename, &tinyYolov1, 0, 'm', 1);
             createLinearDAG(zerothLayer1);
             cudaEventRecord(start);
             se.schedule_sequential(zerothLayer1, fpcf);
@@ -593,8 +599,7 @@ int main(int argc, char *argv[]) {
             // tinyYolov1.deallocateSpace();
             strcpy(filename, tinyYolov2.imgpath);
             strcat(filename, list2[no]);
-            auto zerothLayer2 =
-                new InputOperation(filename, &tinyYolov2, 0, 'm', 2);
+            auto zerothLayer2 = new InputOperation(filename, &tinyYolov2, 0, 'm', 2);
             createLinearDAG(zerothLayer2);
             cudaEventRecord(start);
             se.schedule_sequential(zerothLayer2, fpcf);
@@ -604,10 +609,43 @@ int main(int argc, char *argv[]) {
             total_time += ms;
         }
         fclose(fpcf);
-        printf("Total time to process %d images is %f\n", numOfImages,
-               total_time);
+        printf("Total time to process %d images is %f\n", numOfImages, total_time);
         // tinyYolov2.deallocateSpace();
         break;
+    }
+    case PROGRAM_TYPE::COSCHEDULING:
+        {
+        vector <Operation *> pipe1, pipe2;
+        //Parallel execution of two pipelines
+        auto zerothLayer11 = new InputOperation("dog.jpg", &tinyYolov1, 0, 'm', 1);
+        createLinearDAG(zerothLayer11);
+        Operation *currentOperation = zerothLayer11;
+        while (currentOperation != nullptr) {
+            printf("%c  ", currentOperation->op_type);
+            if (currentOperation->op_type=='c'){
+                pipe1.push_back(currentOperation);
+            }
+            currentOperation = currentOperation->children.back();
+        }
+        printf("\n");
+        auto zerothLayer22 = new InputOperation("eagle.jpg", &tinyYolov2, 0, 'm', 2);
+        createLinearDAG(zerothLayer22);
+        currentOperation = zerothLayer22;
+        while (currentOperation != nullptr) {
+            printf("%c  ", currentOperation->op_type);
+            if (currentOperation->op_type=='c'){
+                pipe2.push_back(currentOperation);
+            }
+            currentOperation = currentOperation->children.back();
+        }
+        printf("\nNumber of elements in pipe1 is %ld\n",pipe1.size());
+        printf("Number of elements in pipe1 is %ld\n",pipe2.size());
+        //call schedule profile function
+        printf("starting execution of schedule_profile for generating co-scheduling table\n");
+        se.schedule_profile1(zerothLayer11, zerothLayer22, pipe1, pipe2);
+        printf("Finished preparing co-scheduling table");
+        break;
+        }
     }
 }
 /*
