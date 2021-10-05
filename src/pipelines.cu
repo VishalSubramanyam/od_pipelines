@@ -1,10 +1,12 @@
-#include "ScheduleEngine.h"
-#include "dag.h"
 #include "solver.h"
+#include <ScheduleEngine.h>
 #include <cmath>
 #include <cstdlib>
+#include <dag.h>
 #include <dirent.h>
 #include <iostream>
+#include <lsf_scheduler.h>
+#include <utilities.h>
 
 enum PROGRAM_TYPE { SEQUENTIAL = 1, COSCHEDULING = 2, LSF = 3, SMT = 4 };
 
@@ -569,7 +571,7 @@ int main(int argc, char *argv[]) {
 
         closedir(d2);
     } else {
-        printf("Unable to open direcoty %s\n", tinyYolov2.imgpath);
+        printf("Unable to open directory %s\n", tinyYolov2.imgpath);
         exit(1);
     }
     assert(strlen(argv[argc - 1]) == 1);
@@ -649,6 +651,28 @@ int main(int argc, char *argv[]) {
                "co-scheduling table\n");
         se.schedule_profile(zerothLayer1, zerothLayer2, pipe1, pipe2);
         printf("Finished preparing co-scheduling table");
+        break;
+    }
+    case PROGRAM_TYPE::LSF: {
+        ifstream timingFile;
+        timingFile.open("output/arrival-execution.txt");
+        string filename = tinyYolov1.imgpath;
+        filename += list1[0];
+        auto zerothLayer1 =
+            new InputOperation(filename, &tinyYolov1, 0, 'm', 1);
+        createLinearDAG(zerothLayer1);
+        filename = tinyYolov2.imgpath;
+        filename += list2[0];
+        auto zerothLayer2 =
+            new InputOperation(filename, &tinyYolov2, 0, 'm', 2);
+        createLinearDAG(zerothLayer2);
+        // loadTimings(timingFile1, zerothLayer1);
+        fillExecutionTime(timingFile, {zerothLayer1, zerothLayer2});
+        // Start the execution of LSF
+        vector<InputOperation *> v;
+        v.push_back(zerothLayer1);
+        v.push_back(zerothLayer2);
+        start(v);
         break;
     }
     }

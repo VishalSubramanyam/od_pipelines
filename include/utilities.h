@@ -8,6 +8,7 @@
 #include <iostream>
 #include <layer_params.h>
 #include <vector>
+#include <chrono>
 #define BLOCK1 512
 
 typedef enum { LOGISTIC, LINEAR } ACTIVATION;
@@ -103,4 +104,5 @@ void option_insert(list *l, char *key, char *val);
 int read_option(char *s, list *options);
 list *read_data_cfg(const char *filename);
 void fillExecutionTime(ifstream &fp, vector<InputOperation *> dags);
+void print_timings(vector<InputOperation *> &dags, cudaEvent_t &global_start);
 #endif

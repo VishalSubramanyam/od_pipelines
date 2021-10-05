@@ -1,16 +1,16 @@
 #include "coarsened_forward_convolution.h"
 #include "image.h"
+#include <lsf_scheduler.h>
 #include <algorithm>
 #include <assert.h>
 #include <cmath>
 #include <cstdlib>
 #include <dag.h>
 #include <utilities.h>
-#include "lsf.h"
+#include <chrono>
 using namespace std;
 
-
-int no_of_pipelines=2;
+int no_of_pipelines;
 /* arrays, each element belongs to one pipeline each */
 vector<cudaStream_t> stream;
 vector<cudnnHandle_t> cudnnHandles;
@@ -19,8 +19,11 @@ vector<timeMS> slack;
 vector<timeMS> deadline;
 vector<Operation *> HEAD;
 bool opcomplete;
+int dags_left;
 
 cudaEvent_t now, global_start;
+chrono::time_point<chrono::steady_clock> timeGlobalStart; // globalStart
+chrono::time_point<chrono::steady_clock> timeNow; // time now
 
 static void dispatch(Operation *tp, int index) {
     assert(index < no_of_pipelines);
@@ -49,8 +52,8 @@ static void dispatch(Operation *tp, int index) {
         space_tracker.updateSpace(CnmemSpace::SUB,
                                   nm->layer_input_size[0] * nm->data_type_size);
         // checkCudaErrors(cudaMemcpy(nm->layer_input[0], r.data, nm->batch_size
-        // * nm->input_channels * nm->input_h * nm->input_w * nm->data_type_size,
-        // cudaMemcpyHostToDevice));
+        // * nm->input_channels * nm->input_h * nm->input_w *
+        // nm->data_type_size, cudaMemcpyHostToDevice));
     }
     float alpha = 1.0, beta = 0.0;
     float Salpha = 1.0, Sbeta = 0.0;
@@ -240,7 +243,7 @@ static void dispatch(Operation *tp, int index) {
         // newly added block
         //--detection *dets = make_network_boxes(cur_params,0.5, &nbox);
         //--fill_network_boxes(cur_params,nm->img_w,nm->img_h, 0.5,0, dets,
-        //result, nm->layer_input_size[i+1], nm->input_w, nm->input_h);
+        // result, nm->layer_input_size[i+1], nm->input_w, nm->input_h);
         // print_detector_detections(fps, id, dets, num, classes, w, h);
         //----list *options = read_data_cfg("cfg/coco.data");
         // char *name_list = option_find_str(options, "names",
@@ -250,7 +253,7 @@ static void dispatch(Operation *tp, int index) {
         //--char **names = get_labels("data/coco.names");
         //--image **alphabet = load_alphabet();
         //--draw_detections(nm->im, dets, nbox, 0.5, names, alphabet,
-        //cur_params->classes);
+        // cur_params->classes);
         //--save_image(nm->im, "predictions");
         //--free_detections(dets, nbox);
     } else if (nm->layer_type[i] == SOFTMAX) {
@@ -282,8 +285,8 @@ static void dispatch(Operation *tp, int index) {
         //	int *correct_count=0;
         //	nm->compareOutputCorrect(correct_count,nm->y);
         //	checkCNMEM(cnmemFree(nm->layer_input[nm->num_layers - 1],
-        //NULL)); 	space_tracker.updateSpace(CnmemSpace::ADD,
-        //nm->layer_input_size[nm->num_layers - 1] * nm->data_type_size);
+        // NULL)); 	space_tracker.updateSpace(CnmemSpace::ADD,
+        // nm->layer_input_size[nm->num_layers - 1] * nm->data_type_size);
         //--
         int top = 5;
         list *options =
@@ -308,9 +311,9 @@ static void dispatch(Operation *tp, int index) {
             // if(net->hierarchy) printf("%d, %s: %f, parent: %s \n",index,
             // names[index], predictions[index], (net->hierarchy->parent[index]
             // >= 0) ? names[net->hierarchy->parent[index]] : "Root"); else
-            // printf("%s: %f\n",names[index], predictions[index]); printf("index
-            // is %d: %5.2f%%: %s\n",index, result[index]*100, names[index]);
-            // printf("index is %d: %s\n",index, names[index]);
+            // printf("%s: %f\n",names[index], predictions[index]);
+            // printf("index is %d: %5.2f%%: %s\n",index, result[index]*100,
+            // names[index]); printf("index is %d: %s\n",index, names[index]);
         }
     }
     if (nm->layer_type[i] == CONV) {
@@ -327,14 +330,13 @@ static void dispatch(Operation *tp, int index) {
 
 static void setHEAD(vector<InputOperation *> &dags) {
     for (int i = 0; i < no_of_pipelines; i++) {
-        HEAD[i] = dags[i];
-        //HEAD.push_back(dags[i]);
+        HEAD.push_back(dags[i]);
     }
 }
 
 static void loadDeadlines() {
     for (int i = 0; i < no_of_pipelines; i++) {
-        deadline[i] = 80.0;
+        deadline.push_back(80.0);
     }
 }
 
@@ -346,14 +348,15 @@ static timeMS sumOfExecutionTimes(Operation *op) {
     return sum;
 }
 
-void CUDART_CB my_callback(cudaStream_t stream, cudaError_t status, void *data) {
-    opcomplete=true;
+void CUDART_CB my_callback(cudaStream_t stream, cudaError_t status,
+                           void *data) {
+    opcomplete = true;
 }
 
 static void execute(Operation *tp, int index) {
     checkCudaErrors(cudaEventCreate(&tp->startop));
     checkCudaErrors(cudaEventCreate(&tp->endop));
-    checkCudaErrors(cudaEventRecord(tp->startop,stream[index]));
+    checkCudaErrors(cudaEventRecord(tp->startop, stream[index]));
     if (tp->op_type == 'c') {
         assert(tp->parents.back()->op_type == 'm');
         dispatch(tp, index);
@@ -361,53 +364,53 @@ static void execute(Operation *tp, int index) {
         if (tp->op_layer == 0) {
             InputOperation *zerothLayer = static_cast<InputOperation *>(tp);
             zerothLayer->model->loadFile(
-                const_cast<char *>((zerothLayer->filename).c_str()),stream[index]);
+                const_cast<char *>((zerothLayer->filename).c_str()),
+                stream[index]);
         } else {
-            tp->model->prefetchWeights(tp->op_layer-1, stream[index]); //-1 missing here
+            tp->model->prefetchWeights(tp->op_layer - 1,
+                                       stream[index]); //-1 missing here
         }
     }
-    checkCudaErrors(cudaEventRecord(tp->endop,stream[index]));
-    //cudaEventSynchronize()
-    checkCudaErrors(cudaStreamWaitEvent(stream[index],tp->endop,0));
-    float ms=0;
-    checkCudaErrors(cudaEventElapsedTime(&ms, tp->startop,tp->endop));
-    printf("Time taken to execute %d operationfrom %d pipeline  is: %d\n",tp->pipeline,tp->op_layer,ms);
-    checkCudaErrors(cudaStreamAddCallback(stream[index], my_callback,nullptr,0));
+    checkCudaErrors(cudaEventRecord(tp->endop, stream[index]));
+    checkCudaErrors(
+        cudaStreamAddCallback(stream[index], my_callback, nullptr, 0));
 }
 
-
 static void perform_lsf() {
-    checkCudaErrors(cudaEventRecord(now));
-    timeMS currentTime;
-    checkCudaErrors(cudaEventElapsedTime(&currentTime, global_start, now));
+    chrono::duration<double, std::milli> currentTime  = chrono::steady_clock::now() - timeGlobalStart;
     for (int i = 0; i < no_of_pipelines; i++) {
         if (HEAD[i] != nullptr)
-            slack[i] = deadline[i] - currentTime -
+            slack[i] = deadline[i] - currentTime.count() -
                        sumOfExecutionTimes(
                            HEAD[i]->children.back()); // - something else
     }
     auto index = std::min_element(slack.begin(), slack.end()) - slack.begin();
+    assert(slack[index] < 1.0/0.0); // A dag with infinite slack time should never be picked
     execute(HEAD[index],
             index); // asynchronous placement of the operation on the GPU
     HEAD[index] = HEAD[index]->children.back();
     if (HEAD[index] == nullptr) {
         slack[index] =
             1.0 / 0.0; // setting the slack to infinity so that we never pick it
+        dags_left--;
     }
 }
 
-
-
 void start(vector<InputOperation *> &dags) {
+    no_of_pipelines = dags.size();
+    dags_left = no_of_pipelines;
     setHEAD(dags);
     assert(!HEAD.empty());
-
     for (int i = 0; i < no_of_pipelines; i++) {
+        stream.push_back(cudaStream_t());
+        cudnnHandles.push_back(cudnnHandle_t());
+        cublasHandles.push_back(cublasHandle_t());
         cudaStreamCreate(&stream[i]);
         cudnnCreate(&cudnnHandles[i]);
         cudnnSetStream(cudnnHandles[i], stream[i]);
         cublasCreate(&cublasHandles[i]);
         cublasSetStream(cublasHandles[i], stream[i]);
+        slack.push_back(1.0/0.0);
     }
 
     loadDeadlines();
@@ -417,12 +420,14 @@ void start(vector<InputOperation *> &dags) {
     checkCudaErrors(cudaEventCreate(&global_start));
 
     checkCudaErrors(cudaEventRecord(global_start));
-
-    while(true){  ///write termination conditon
-        opcomplete=false;
+    timeGlobalStart = std::chrono::steady_clock::now();
+    while (dags_left) {
+        opcomplete = false;
         perform_lsf();
-        //Check for completion of operation
-        while (opcomplete != true) ;
+        // Check for completion of operation
+        while (opcomplete != true)
+            ;
     }
-}
 
+    print_timings(dags, global_start);
+}

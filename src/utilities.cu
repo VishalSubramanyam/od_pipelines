@@ -917,3 +917,26 @@ void fillExecutionTime(std::ifstream &fp, std::vector<InputOperation *> dags) {
         }
     }
 }
+
+void print_timings(vector<InputOperation *> &dags, cudaEvent_t &global_start) {
+    ofstream outputFile("output/lsf_start_end.txt");
+    for (int i = 0; i < dags.size(); i++) {
+        Operation *tp = dags[i];
+        for (int j = 0; tp != nullptr; j++, tp = tp->children.back()) {
+            // cudaEventSynchronize()
+            float startTime, endTime;
+            checkCudaErrors(
+                cudaEventElapsedTime(&startTime, global_start, tp->startop));
+            checkCudaErrors(
+                cudaEventElapsedTime(&endTime, global_start, tp->endop));
+            float ms;
+            checkCudaErrors(cudaEventElapsedTime(&ms, tp->startop, tp->endop));
+            printf(
+                "Time taken to execute operation %d from pipeline %d is: %f\n",
+                j, tp->pipeline, ms);
+            cout << "Start time for pipeline " << tp->pipeline << ", operation " << j << ": " << startTime << endl;
+            cout << "End time for pipeline " << tp->pipeline << ", operation " << j << ": " << endTime << endl;
+            outputFile << tp->pipeline << " " << tp->op_type << " " << startTime << " " << endTime << endl;
+        }
+    }
+}
