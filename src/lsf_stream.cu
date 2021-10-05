@@ -1,5 +1,10 @@
 #include <ScheduleEngine.h>
 #include <dirent.h>
+#include <utilities.h>
+#include "lsf.h"
+
+
+
 
 int str_ends_with(const char *s, const char *suffix) {
     size_t slen = strlen(s);
@@ -491,82 +496,32 @@ int main(int argc, char *argv[]) {
     }
     // warmup code ends here
 
-    DIR *d1, *d2;
-    struct dirent *dir;
-    char **list1, **list2;
-    int i = 0;
-    list1 = (char **)malloc(numOfImages * sizeof(char *));
-    list2 = (char **)malloc(numOfImages * sizeof(char *));
-    printf("P1: %s", tinyYolov1.imgpath);
-    printf("P2: %s", tinyYolov2.imgpath);
-    d1 = opendir(tinyYolov1.imgpath); // arg[3] for pipeline01  image path
-    d2 = opendir(tinyYolov2.imgpath); // arg[4] for pipeline01  image path
-    if (d1) {
-        while ((dir = readdir(d1)) != NULL && i < numOfImages) {
-
-            if (!strcmp(dir->d_name, "."))
-                continue;
-            if (!strcmp(dir->d_name, ".."))
-                continue;
-            if (str_ends_with(dir->d_name, ".JPEG")) {
-                list1[i] =
-                    (char *)malloc((strlen(dir->d_name) + 1) * sizeof(char));
-                strcpy(list1[i], dir->d_name);
-                printf("%s\n", list1[i]);
-                i++;
-            }
-        }
-        closedir(d1);
-    } else {
-        printf("Unable to open direcoty %s\n", tinyYolov1.imgpath);
-        exit(1);
-    }
-
-    i = 0;
-
-    if (d2) {
-        while ((dir = readdir(d2)) != NULL && i < numOfImages) {
-
-            if (!strcmp(dir->d_name, "."))
-                continue;
-            if (!strcmp(dir->d_name, ".."))
-                continue;
-            if (str_ends_with(dir->d_name, ".JPEG")) {
-                list2[i] =
-                    (char *)malloc((strlen(dir->d_name) + 1) * sizeof(char));
-                strcpy(list2[i], dir->d_name);
-                printf("%s\n", list2[i]);
-                i++;
-            }
-        }
-
-        closedir(d2);
-    } else {
-        printf("Unable to open direcoty %s\n", tinyYolov2.imgpath);
-        exit(1);
-    }
-
+    
     se.createGlobalEvent();
     FILE *fpcf = fopen("lsf_stream.txt", "a");
-    char filename[100];
+
     ifstream timingFile1, timingFile2;
     timingFile1.open("timingFile1.txt");
     timingFile2.open("timingFile2.txt");
 
-    for (int no = 0; no < numOfImages; no++) {
-        strcpy(filename, tinyYolov1.imgpath);
-        strcat(filename, list1[no]);
-        auto zerothLayer1 =
-            new InputOperation(filename, &tinyYolov1, 0, 'm', 1);
-        createLinearDAG(zerothLayer1);
-        loadTimings(timingFile1, zerothLayer1);
-        strcpy(filename, tinyYolov2.imgpath);
-        strcat(filename, list2[no]);
-        auto zerothLayer2 =
-            new InputOperation(filename, &tinyYolov2, 0, 'm', 2);
-        createLinearDAG(zerothLayer2);
-        loadTimings(timingFile2, zerothLayer2);
-    }
+
+    auto zerothLayer1 =
+            new InputOperation("data/dog.jpg", &tinyYolov1, 0, 'm', 1);
+    createLinearDAG(zerothLayer1);
+        //loadTimings(timingFile1, zerothLayer1);
+    fillExecutionTime(timingFile1,{zerothLayer1});
+
+    auto zerothLayer2 =
+            new InputOperation("data/eagle.jpg", &tinyYolov2, 0, 'm', 2);
+    createLinearDAG(zerothLayer2);
+        //loadTimings(timingFile2, zerothLayer2);
+    fillExecutionTime(timingFile2,{zerothLayer2});
+    
+    //Start the execution of LSF
+    vector <InputOperation*> v;
+    v.push_back(zerothLayer1);
+    v.push_back(zerothLayer2);
+    start(v);
     fclose(fpcf);
 
     return 0;

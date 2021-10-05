@@ -23,6 +23,6 @@ link_directories( /usr/local/cuda-10.2/lib64/ )
 
 #cuda_add_executable( pipelines.out src/pipelines.cu src/neural_net.cu src/layer_params.cu src/user_iface.cu src/utils.cu src/cnmem.cpp src/threadedScheduleEngine.cu src/image.cpp src/coarsened_forward_convolution.cu)
 add_executable( pipelines.out src/pipelines.cu src/neural_net.cu src/layer_params.cu src/user_iface.cu src/utils.cu src/cnmem.cpp src/ScheduleEngine.cu src/image.cpp src/coarsened_forward_convolution.cu src/dag.cu src/utilities.cu)
-add_executable( lsf_stream src/lsf_stream.cu src/lsf_scheduler.cu src/neural_net.cu src/layer_params.cu src/user_iface.cu src/utils.cu src/cnmem.cpp src/image.cpp src/coarsened_forward_convolution.cu src/dag.cu src/utilities.cu)
+add_executable( lsf_stream src/lsf_stream.cu src/lsf_scheduler.cu src/neural_net.cu src/layer_params.cu src/user_iface.cu src/utils.cu src/cnmem.cpp src/ScheduleEngine.cu src/image.cpp src/coarsened_forward_convolution.cu src/dag.cu src/utilities.cu)
 target_link_libraries(pipelines.out -lcudnn -lcublas -lcurand -lpthread -g )
 target_link_libraries(lsf_stream -lcudnn -lcublas -lcurand -lpthread -g )

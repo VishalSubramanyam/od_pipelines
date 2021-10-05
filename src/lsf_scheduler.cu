@@ -6,11 +6,11 @@
 #include <cstdlib>
 #include <dag.h>
 #include <utilities.h>
-
+#include "lsf.h"
 using namespace std;
-using timeMS = float;
 
-int no_of_pipelines;
+
+int no_of_pipelines=2;
 /* arrays, each element belongs to one pipeline each */
 vector<cudaStream_t> stream;
 vector<cudnnHandle_t> cudnnHandles;
@@ -18,6 +18,7 @@ vector<cublasHandle_t> cublasHandles;
 vector<timeMS> slack;
 vector<timeMS> deadline;
 vector<Operation *> HEAD;
+bool opcomplete;
 
 cudaEvent_t now, global_start;
 
@@ -324,6 +325,13 @@ static void dispatch(Operation *tp, int index) {
     // nm->data_type_size);
 }
 
+static void setHEAD(vector<InputOperation *> &dags) {
+    for (int i = 0; i < no_of_pipelines; i++) {
+        HEAD[i] = dags[i];
+        //HEAD.push_back(dags[i]);
+    }
+}
+
 static void loadDeadlines() {
     for (int i = 0; i < no_of_pipelines; i++) {
         deadline[i] = 80.0;
@@ -337,7 +345,15 @@ static timeMS sumOfExecutionTimes(Operation *op) {
     }
     return sum;
 }
+
+void CUDART_CB my_callback(cudaStream_t stream, cudaError_t status, void *data) {
+    opcomplete=true;
+}
+
 static void execute(Operation *tp, int index) {
+    checkCudaErrors(cudaEventCreate(&tp->startop));
+    checkCudaErrors(cudaEventCreate(&tp->endop));
+    checkCudaErrors(cudaEventRecord(tp->startop,stream[index]));
     if (tp->op_type == 'c') {
         assert(tp->parents.back()->op_type == 'm');
         dispatch(tp, index);
@@ -345,37 +361,22 @@ static void execute(Operation *tp, int index) {
         if (tp->op_layer == 0) {
             InputOperation *zerothLayer = static_cast<InputOperation *>(tp);
             zerothLayer->model->loadFile(
-                const_cast<char *>((zerothLayer->filename).c_str()));
+                const_cast<char *>((zerothLayer->filename).c_str()),stream[index]);
         } else {
-            tp->model->prefetchWeights(tp->op_layer, stream[index]);
+            tp->model->prefetchWeights(tp->op_layer-1, stream[index]); //-1 missing here
         }
     }
-    checkcudaStreamAddCallback(stream[index], );
-}
-void start(vector<InputOperation *> &dags) {
-    setHEAD(dags);
-    assert(!HEAD.empty());
-
-    for (int i = 0; i < no_of_pipelines; i++) {
-        cudaStreamCreate(&stream[i]);
-        cudnnCreate(&cudnnHandles[i]);
-        cudnnSetStream(cudnnHandles[i], stream[i]);
-        cublasCreate(&cublasHandles[i]);
-        cublasSetStream(cublasHandles[i], stream[i]);
-    }
-
-    loadDeadlines();
-
-    checkCudaErrors(cudaEventCreate(&now));
-
-    checkCudaErrors(cudaEventCreate(&global_start));
-
-    checkCudaErrors(cudaEventRecord(global_start));
-    perform_lsf(nullptr, cudaError_t::cudaSuccess, nullptr);
+    checkCudaErrors(cudaEventRecord(tp->endop,stream[index]));
+    //cudaEventSynchronize()
+    checkCudaErrors(cudaStreamWaitEvent(stream[index],tp->endop,0));
+    float ms=0;
+    checkCudaErrors(cudaEventElapsedTime(&ms, tp->startop,tp->endop));
+    printf("Time taken to execute %d operationfrom %d pipeline  is: %d\n",tp->pipeline,tp->op_layer,ms);
+    checkCudaErrors(cudaStreamAddCallback(stream[index], my_callback,nullptr,0));
 }
 
-static void CUDART_CB perform_lsf(cudaStream_t stream, cudaError_t status,
-                                  void *data) {
+
+static void perform_lsf() {
     checkCudaErrors(cudaEventRecord(now));
     timeMS currentTime;
     checkCudaErrors(cudaEventElapsedTime(&currentTime, global_start, now));
@@ -395,8 +396,33 @@ static void CUDART_CB perform_lsf(cudaStream_t stream, cudaError_t status,
     }
 }
 
-static void setHEAD(vector<InputOperation *> &dags) {
+
+
+void start(vector<InputOperation *> &dags) {
+    setHEAD(dags);
+    assert(!HEAD.empty());
+
     for (int i = 0; i < no_of_pipelines; i++) {
-        HEAD[i] = dags[i];
+        cudaStreamCreate(&stream[i]);
+        cudnnCreate(&cudnnHandles[i]);
+        cudnnSetStream(cudnnHandles[i], stream[i]);
+        cublasCreate(&cublasHandles[i]);
+        cublasSetStream(cublasHandles[i], stream[i]);
+    }
+
+    loadDeadlines();
+
+    checkCudaErrors(cudaEventCreate(&now));
+
+    checkCudaErrors(cudaEventCreate(&global_start));
+
+    checkCudaErrors(cudaEventRecord(global_start));
+
+    while(true){  ///write termination conditon
+        opcomplete=false;
+        perform_lsf();
+        //Check for completion of operation
+        while (opcomplete != true) ;
     }
 }
+
