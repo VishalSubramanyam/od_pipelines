@@ -918,6 +918,31 @@ void fillExecutionTime(std::ifstream &fp, std::vector<InputOperation *> dags) {
     }
 }
 
+void fillSMTDetails(std::ifstream &fp, std::vector<InputOperation *> dags){
+    for (auto &input_operation : dags) {
+        Operation *tp = input_operation;
+        while (tp != nullptr) {
+            int temp;
+            fp >> temp;
+            fp >> temp;
+            fp >> temp;
+            fp >> tp->time_to_start;
+            fp >> tp->chosenStream;
+            tp = tp->children.back();
+        }
+    }
+}
+
+// Add all the operations of a linear DAG into the given priority queue such that
+// operations with lower start times are at the top
+void dagToPriorityQueue(std::priority_queue<Operation *, std::vector<Operation *>, compareStartTimings> &pq, Operation *op){
+    while(op != nullptr)
+    {
+        pq.push(op);
+        op=op->children.back();
+    }
+}
+
 void print_timings(vector<InputOperation *> &dags, cudaEvent_t &global_start) {
     ofstream outputFile("output/lsf_start_end.txt");
     for (int i = 0; i < dags.size(); i++) {

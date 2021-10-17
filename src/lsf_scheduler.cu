@@ -1,13 +1,15 @@
 #include "coarsened_forward_convolution.h"
 #include "image.h"
-#include <lsf_scheduler.h>
 #include <algorithm>
 #include <assert.h>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <dag.h>
+#include <lsf_scheduler.h>
+#include <mutex>
+#include <thread>
 #include <utilities.h>
-#include <chrono>
 using namespace std;
 
 int no_of_pipelines;
@@ -18,12 +20,16 @@ vector<cublasHandle_t> cublasHandles;
 vector<timeMS> slack;
 vector<timeMS> deadline;
 vector<Operation *> HEAD;
+vector<timeMS> cachedSumExecutionTimes;
+vector<bool> busyness;
+vector<Operation *> operationQueue;
+vector<std::thread> threadSet;
 bool opcomplete;
 int dags_left;
 
 cudaEvent_t now, global_start;
 chrono::time_point<chrono::steady_clock> timeGlobalStart; // globalStart
-chrono::time_point<chrono::steady_clock> timeNow; // time now
+chrono::time_point<chrono::steady_clock> timeNow;         // time now
 
 static void dispatch(Operation *tp, int index) {
     assert(index < no_of_pipelines);
@@ -348,14 +354,19 @@ static timeMS sumOfExecutionTimes(Operation *op) {
     return sum;
 }
 
-void CUDART_CB my_callback(cudaStream_t stream, cudaError_t status,
-                           void *data) {
-    opcomplete = true;
+static void my_callback(Operation *currentOp) {
+
+    checkCudaErrors(cudaEventSynchronize(currentOp->endop));
+    HEAD[currentOp->pipeline] = HEAD[currentOp->pipeline]->children.back();
+    if (HEAD[currentOp->pipeline] != nullptr)
+        operationQueue.push_back(HEAD[currentOp->pipeline]); // race condition
+    else
+        dags_left--;
+    busyness[currentOp->pipeline] = false;
 }
 
 static void execute(Operation *tp, int index) {
-    checkCudaErrors(cudaEventCreate(&tp->startop));
-    checkCudaErrors(cudaEventCreate(&tp->endop));
+    assert(index == tp->pipeline);
     checkCudaErrors(cudaEventRecord(tp->startop, stream[index]));
     if (tp->op_type == 'c') {
         assert(tp->parents.back()->op_type == 'm');
@@ -372,27 +383,14 @@ static void execute(Operation *tp, int index) {
         }
     }
     checkCudaErrors(cudaEventRecord(tp->endop, stream[index]));
-    checkCudaErrors(
-        cudaStreamAddCallback(stream[index], my_callback, nullptr, 0));
 }
 
-static void perform_lsf() {
-    chrono::duration<double, std::milli> currentTime  = chrono::steady_clock::now() - timeGlobalStart;
-    for (int i = 0; i < no_of_pipelines; i++) {
-        if (HEAD[i] != nullptr)
-            slack[i] = deadline[i] - currentTime.count() -
-                       sumOfExecutionTimes(
-                           HEAD[i]->children.back()); // - something else
-    }
-    auto index = std::min_element(slack.begin(), slack.end()) - slack.begin();
-    assert(slack[index] < 1.0/0.0); // A dag with infinite slack time should never be picked
-    execute(HEAD[index],
-            index); // asynchronous placement of the operation on the GPU
-    HEAD[index] = HEAD[index]->children.back();
-    if (HEAD[index] == nullptr) {
-        slack[index] =
-            1.0 / 0.0; // setting the slack to infinity so that we never pick it
-        dags_left--;
+static void calculateSlackTimes(vector<Operation *> &operationQueue) {
+    chrono::duration<double, std::milli> currentTime =
+        chrono::steady_clock::now() - timeGlobalStart;
+    for (Operation *op : operationQueue) {
+        slack[op->pipeline] = deadline[op->pipeline] - currentTime.count() -
+                              cachedSumExecutionTimes[op->pipeline];
     }
 }
 
@@ -410,7 +408,8 @@ void start(vector<InputOperation *> &dags) {
         cudnnSetStream(cudnnHandles[i], stream[i]);
         cublasCreate(&cublasHandles[i]);
         cublasSetStream(cublasHandles[i], stream[i]);
-        slack.push_back(1.0/0.0);
+        slack.push_back(1.0 / 0.0);
+        cachedSumExecutionTimes.push_back(sumOfExecutionTimes(HEAD[i]));
     }
 
     loadDeadlines();
@@ -421,13 +420,38 @@ void start(vector<InputOperation *> &dags) {
 
     checkCudaErrors(cudaEventRecord(global_start));
     timeGlobalStart = std::chrono::steady_clock::now();
-    while (dags_left) {
-        opcomplete = false;
-        perform_lsf();
-        // Check for completion of operation
-        while (opcomplete != true)
-            ;
+
+    operationQueue.push_back(HEAD[0]);
+    operationQueue.push_back(HEAD[1]);
+
+    auto compareFunction = [](Operation *a, Operation *b) {
+        return slack[a->pipeline] >= slack[b->pipeline];
+    };
+
+    for (int i = 0; i < no_of_pipelines; i++) {
+        busyness.push_back(false);
     }
 
+    while (dags_left || !operationQueue.empty()) {
+        while (true) {
+            if (operationQueue.empty()) {
+                break;
+            }
+            calculateSlackTimes(operationQueue);
+            sort(operationQueue.begin(), operationQueue.end(), compareFunction);
+            Operation *toBeScheduledOperation = operationQueue.back();
+            operationQueue.pop_back();
+            if (!busyness[toBeScheduledOperation->pipeline]) {
+                busyness[toBeScheduledOperation->pipeline] = true;
+                execute(toBeScheduledOperation,
+                        toBeScheduledOperation->pipeline);
+                cachedSumExecutionTimes[toBeScheduledOperation->pipeline] -=
+                    toBeScheduledOperation->time_to_execute;
+            } else {
+                operationQueue.push_back(toBeScheduledOperation);
+                break;
+            }
+        }
+    }
     print_timings(dags, global_start);
 }

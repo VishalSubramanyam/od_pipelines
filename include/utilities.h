@@ -1,14 +1,16 @@
 #ifndef UTILITIES_H
 #define UTILITIES_H
 #include <assert.h>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <dag.h>
 #include <image.h>
 #include <iostream>
 #include <layer_params.h>
+#include <queue>
 #include <vector>
-#include <chrono>
+
 #define BLOCK1 512
 
 typedef enum { LOGISTIC, LINEAR } ACTIVATION;
@@ -104,5 +106,15 @@ void option_insert(list *l, char *key, char *val);
 int read_option(char *s, list *options);
 list *read_data_cfg(const char *filename);
 void fillExecutionTime(ifstream &fp, vector<InputOperation *> dags);
+void fillSMTDetails(std::ifstream &fp, std::vector<InputOperation *> dags);
+struct compareStartTimings {
+    bool operator()(Operation *op1, Operation *op2) {
+        return op1->time_to_start >= op2->time_to_start;
+    }
+};
+void dagToPriorityQueue(
+    std::priority_queue<Operation *, std::vector<Operation *>,
+                        compareStartTimings> &pq,
+    Operation *op);
 void print_timings(vector<InputOperation *> &dags, cudaEvent_t &global_start);
 #endif

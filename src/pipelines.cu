@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <iostream>
 #include <lsf_scheduler.h>
+#include <thread>
 #include <utilities.h>
 
 enum PROGRAM_TYPE { SEQUENTIAL = 1, COSCHEDULING = 2, LSF = 3, SMT = 4 };
@@ -575,6 +576,8 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
     assert(strlen(argv[argc - 1]) == 1);
+    chrono::time_point<chrono::steady_clock> timeGlobalStart =
+        chrono::steady_clock::now(); // globalStart
     switch (atoi(argv[argc - 1])) {
     case PROGRAM_TYPE::SEQUENTIAL: {
         cudaEvent_t start, stop;
@@ -659,12 +662,12 @@ int main(int argc, char *argv[]) {
         string filename = tinyYolov1.imgpath;
         filename += list1[0];
         auto zerothLayer1 =
-            new InputOperation(filename, &tinyYolov1, 0, 'm', 1);
+            new InputOperation(filename, &tinyYolov1, 0, 'm', 0);
         createLinearDAG(zerothLayer1);
         filename = tinyYolov2.imgpath;
         filename += list2[0];
         auto zerothLayer2 =
-            new InputOperation(filename, &tinyYolov2, 0, 'm', 2);
+            new InputOperation(filename, &tinyYolov2, 0, 'm', 1);
         createLinearDAG(zerothLayer2);
         // loadTimings(timingFile1, zerothLayer1);
         fillExecutionTime(timingFile, {zerothLayer1, zerothLayer2});
@@ -675,7 +678,79 @@ int main(int argc, char *argv[]) {
         start(v);
         break;
     }
+    case PROGRAM_TYPE::SMT: {
+        ScheduleEngine se;
+        ifstream timingFile;
+        timingFile.open("output/smt-arrival-stream.txt");
+        string filename = tinyYolov1.imgpath;
+        filename += list1[0];
+        auto zerothLayer1 =
+            new InputOperation(filename, &tinyYolov1, 0, 'm', 1);
+        createLinearDAG(zerothLayer1);
+        filename = tinyYolov2.imgpath;
+        filename += list2[0];
+        auto zerothLayer2 =
+            new InputOperation(filename, &tinyYolov2, 0, 'm', 2);
+        createLinearDAG(zerothLayer2);
+        // loadTimings(timingFile1, zerothLayer1);
+        fillSMTDetails(timingFile, {zerothLayer1, zerothLayer2});
+        std::priority_queue<Operation *, std::vector<Operation *>,
+                            compareStartTimings>
+            operationQueue;
+        dagToPriorityQueue(operationQueue, (Operation *)zerothLayer1);
+        dagToPriorityQueue(operationQueue, (Operation *)zerothLayer2);
+        while (!operationQueue.empty()) {
+            auto currentOperation = operationQueue.top();
+            operationQueue.pop();
+            {
+                if (currentOperation->op_type == 'c') {
+                    cudaEventSynchronize(
+                        currentOperation->parents.back()->endop);
+                    auto currentStream =
+                        (currentOperation->chosenStream == 'H')
+                            ? ScheduleEngine::HIGH_COMPUTE_STREAM
+                            : ScheduleEngine::LOW_COMPUTE_STREAM;
+                    checkCudaErrors(
+                        cudaEventRecord(currentOperation->startop,
+                                        se.compute_streams[currentStream]));
+                    assert(currentOperation->parents.back()->op_type == 'm');
+                    se.dispatch(currentOperation, currentStream);
+                    checkCudaErrors(
+                        cudaEventRecord(currentOperation->endop,
+                                        se.compute_streams[currentStream]));
+                } else if (currentOperation->op_type == 'm') {
+                    checkCudaErrors(cudaEventRecord(currentOperation->endop,
+                                                    se.memoryStream));
+                    if (currentOperation->op_layer == 0) {
+                        InputOperation *zerothLayer =
+                            static_cast<InputOperation *>(currentOperation);
+                        zerothLayer->model->loadFile(
+                            const_cast<char *>((zerothLayer->filename).c_str()),
+                            se.memoryStream);
+                    } else {
+                        currentOperation->model->prefetchWeights(
+                            currentOperation->op_layer - 1,
+                            se.memoryStream); //-1 missing here
+                    }
+                    checkCudaErrors(cudaEventRecord(currentOperation->endop,
+                                                    se.memoryStream));
+                }
+            }
+            // sleep for (duration = start time of next op - start time of
+            // current op)
+            std::this_thread::sleep_for(
+                std::chrono::duration<double, std::milli>(
+                    operationQueue.top()->time_to_start -
+                    currentOperation->time_to_start - 0.3));
+        }
+        break;
     }
+    }
+    cout << "Total time for processing = "
+         << (chrono::duration_cast<chrono::duration<double, std::milli>>(
+                 chrono::steady_clock::now() - timeGlobalStart))
+                .count()
+         << endl;
 }
 /*
 

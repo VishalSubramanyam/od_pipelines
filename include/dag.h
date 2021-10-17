@@ -13,6 +13,7 @@ struct Operation {
     int pipeline;
     float time_to_start = 0.0, time_to_execute = 0.0;
     cudaEvent_t startop, endop;
+    char chosenStream; // 'L' or 'H' based on low or high compute streams
 
     vector<Operation *> parents;
     vector<Operation *> children;
@@ -26,11 +27,17 @@ struct Operation {
     Operation(NeuralNet *model, char type, int op_layer, int priority,
               char op_type, int pipeline)
         : model(model), type(type), op_layer(op_layer), priority(priority),
-          op_type(op_type), pipeline(pipeline) {}
+          op_type(op_type), pipeline(pipeline) {
+            checkCudaErrors(cudaEventCreateWithFlags(&startop, cudaEventBlockingSync));
+            checkCudaErrors(cudaEventCreateWithFlags(&endop, cudaEventBlockingSync));
+          }
     Operation(NeuralNet *model, int op_layer, int priority, char op_type,
               int pipeline)
         : model(model), op_layer(op_layer), priority(priority),
-          op_type(op_type), pipeline(pipeline) {}
+          op_type(op_type), pipeline(pipeline) {
+            checkCudaErrors(cudaEventCreateWithFlags(&startop, cudaEventBlockingSync));
+            checkCudaErrors(cudaEventCreateWithFlags(&endop, cudaEventBlockingSync));
+          }
     Operation() = default;
 };
 
