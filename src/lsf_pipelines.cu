@@ -1,39 +1,27 @@
-#include "coarsened_forward_convolution.h"
-#include "image.h"
-#include <algorithm>
-#include <assert.h>
-#include <chrono>
-#include <cmath>
-#include <cstdlib>
-#include <dag.h>
-#include <lsf_scheduler.h>
-#include <mutex>
-#include <thread>
-#include <utilities.h>
-using namespace std;
+#include <lsf_pipelines.h>
 
-static int no_of_pipelines;
+static int no_of_pipelines = 2;
 /* arrays, each element belongs to one pipeline each */
-static vector<cudaStream_t> stream;
+vector<cudaStream_t> lsf_stream;
 static vector<cudnnHandle_t> cudnnHandles;
 static vector<cublasHandle_t> cublasHandles;
-static vector<timeMS> slack;
-static vector<timeMS> deadline;
-static vector<Operation *> HEAD;
-static vector<timeMS> cachedSumExecutionTimes;
-static vector<bool> busyness;
-static vector<Operation *> operationQueue;
-static vector<std::thread> threadSet;
-static bool opcomplete;
-static int dags_left;
 
-static cudaEvent_t now, global_start;
-static chrono::time_point<chrono::steady_clock> timeGlobalStart; // globalStart
-static chrono::time_point<chrono::steady_clock> timeNow;         // time now
+void lsf_initialize() {
+    for (int i = 0; i < no_of_pipelines; i++) {
+        lsf_stream.push_back(cudaStream_t());
+        cudnnHandles.push_back(cudnnHandle_t());
+        cublasHandles.push_back(cublasHandle_t());
+        cudaStreamCreate(&lsf_stream[i]);
+        cudnnCreate(&cudnnHandles[i]);
+        cudnnSetStream(cudnnHandles[i], lsf_stream[i]);
+        cublasCreate(&cublasHandles[i]);
+        cublasSetStream(cublasHandles[i], lsf_stream[i]);
+    }
+}
 
-static void dispatch(Operation *tp, int index) {
+void lsf_dispatch(Operation *tp, int index) {
     assert(index < no_of_pipelines);
-    cudaStream_t &compute_stream = stream[index];
+    cudaStream_t &compute_stream = lsf_stream[index];
     cudnnHandle_t &cudnn_handle = cudnnHandles[index];
     cublasHandle_t &cublas_handle = cublasHandles[index];
     int i = tp->op_layer - 1;
@@ -332,126 +320,4 @@ static void dispatch(Operation *tp, int index) {
     // nm->lockedcnmemFree(nm->layer_input[i], NULL);
     // space_tracker.updateSpace(CnmemSpace::ADD, nm->layer_input_size[i] *
     // nm->data_type_size);
-}
-
-static void setHEAD(vector<InputOperation *> &dags) {
-    for (int i = 0; i < no_of_pipelines; i++) {
-        HEAD.push_back(dags[i]);
-    }
-}
-
-static void loadDeadlines() {
-    for (int i = 0; i < no_of_pipelines; i++) {
-        deadline.push_back(80.0);
-    }
-}
-
-static timeMS sumOfExecutionTimes(Operation *op) {
-    timeMS sum = 0.0;
-    for (; op != nullptr; op = op->children.back()) {
-        sum += op->time_to_execute;
-    }
-    return sum;
-}
-
-static void my_callback(Operation *currentOp) {
-
-    checkCudaErrors(cudaEventSynchronize(currentOp->endop));
-    HEAD[currentOp->pipeline] = HEAD[currentOp->pipeline]->children.back();
-    if (HEAD[currentOp->pipeline] != nullptr)
-        operationQueue.push_back(HEAD[currentOp->pipeline]); // race condition
-    else
-        dags_left--;
-    busyness[currentOp->pipeline] = false;
-}
-
-static void execute(Operation *tp, int index) {
-    assert(index == tp->pipeline);
-    checkCudaErrors(cudaEventRecord(tp->startop, stream[index]));
-    if (tp->op_type == 'c') {
-        assert(tp->parents.back()->op_type == 'm');
-        dispatch(tp, index);
-    } else if (tp->op_type == 'm') {
-        if (tp->op_layer == 0) {
-            InputOperation *zerothLayer = static_cast<InputOperation *>(tp);
-            zerothLayer->model->loadFile(
-                const_cast<char *>((zerothLayer->filename).c_str()),
-                stream[index]);
-        } else {
-            tp->model->prefetchWeights(tp->op_layer - 1,
-                                       stream[index]); //-1 missing here
-        }
-    }
-    checkCudaErrors(cudaEventRecord(tp->endop, stream[index]));
-}
-
-static void calculateSlackTimes(vector<Operation *> &operationQueue) {
-    chrono::duration<double, std::milli> currentTime =
-        chrono::steady_clock::now() - timeGlobalStart;
-    for (Operation *op : operationQueue) {
-        slack[op->pipeline] = deadline[op->pipeline] - currentTime.count() -
-                              cachedSumExecutionTimes[op->pipeline];
-    }
-}
-
-void start(vector<InputOperation *> &dags) {
-    no_of_pipelines = dags.size();
-    dags_left = no_of_pipelines;
-    setHEAD(dags);
-    assert(!HEAD.empty());
-    for (int i = 0; i < no_of_pipelines; i++) {
-        stream.push_back(cudaStream_t());
-        cudnnHandles.push_back(cudnnHandle_t());
-        cublasHandles.push_back(cublasHandle_t());
-        cudaStreamCreate(&stream[i]);
-        cudnnCreate(&cudnnHandles[i]);
-        cudnnSetStream(cudnnHandles[i], stream[i]);
-        cublasCreate(&cublasHandles[i]);
-        cublasSetStream(cublasHandles[i], stream[i]);
-        slack.push_back(1.0 / 0.0);
-        cachedSumExecutionTimes.push_back(sumOfExecutionTimes(HEAD[i]));
-    }
-
-    loadDeadlines();
-
-    checkCudaErrors(cudaEventCreate(&now));
-
-    checkCudaErrors(cudaEventCreate(&global_start));
-
-    checkCudaErrors(cudaEventRecord(global_start));
-    timeGlobalStart = std::chrono::steady_clock::now();
-
-    operationQueue.push_back(HEAD[0]);
-    operationQueue.push_back(HEAD[1]);
-
-    auto compareFunction = [](Operation *a, Operation *b) {
-        return slack[a->pipeline] >= slack[b->pipeline];
-    };
-
-    for (int i = 0; i < no_of_pipelines; i++) {
-        busyness.push_back(false);
-    }
-
-    while (dags_left || !operationQueue.empty()) {
-        while (true) {
-            if (operationQueue.empty()) {
-                break;
-            }
-            calculateSlackTimes(operationQueue);
-            sort(operationQueue.begin(), operationQueue.end(), compareFunction);
-            Operation *toBeScheduledOperation = operationQueue.back();
-            operationQueue.pop_back();
-            if (!busyness[toBeScheduledOperation->pipeline]) {
-                busyness[toBeScheduledOperation->pipeline] = true;
-                execute(toBeScheduledOperation,
-                        toBeScheduledOperation->pipeline);
-                cachedSumExecutionTimes[toBeScheduledOperation->pipeline] -=
-                    toBeScheduledOperation->time_to_execute;
-            } else {
-                operationQueue.push_back(toBeScheduledOperation);
-                break;
-            }
-        }
-    }
-    print_timings(dags, global_start);
 }
