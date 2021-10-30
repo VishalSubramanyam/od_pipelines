@@ -24,7 +24,7 @@ class NeuralNet;
 
 struct ConvLayerParams {
 	void *W, *b;
-	void *dW, *db;
+	void *temp_W, *temp_b, *dW, *db;
 	
 	void *rolling_mean_cpu, *rolling_variance_cpu, *scales_cpu;
 	void *rolling_mean_gpu, *rolling_variance_gpu, *scales_gpu;
@@ -59,7 +59,7 @@ struct ConvLayerParams {
 							UpdateRule update_rule);
 
 	void allocateSpace(curandGenerator_t curand_gen, cudnnDataType_t data_type, size_t data_type_size, float std_dev, size_t &free_bytes);
-
+	void deallocateSpace(size_t &free_bytes, size_t data_type_size);
 	size_t getWorkspaceSize(size_t &free_bytes, ConvDirection conv_direction, vDNNConvAlgo vdnn_conv_algo);
 	workspaceStatus_t getWorkspaceSize(size_t &free_bytes, ConvDirection conv_direction, vDNNConvAlgoPref algo_pref, bool hard_pref, size_t &workspace_size);
 	
@@ -88,6 +88,7 @@ struct FCLayerParams {
 							LayerDimension &output_size, UpdateRule update_rule);
 	void allocateSpace(curandGenerator_t curand_gen, cudnnDataType_t data_type, size_t data_type_size, 
 						float std_dev, size_t &free_bytes);
+	void deallocateSpace(size_t &free_bytes, size_t data_type_size);
 	
 	void cnmemAllocDerivatives(size_t data_type_size, cudaStream_t stream);
 	void cnmemAllocDerivativesLocked(NeuralNet *net, size_t data_type_size, cudaStream_t stream);
@@ -110,6 +111,7 @@ struct DropoutLayerParams {
 										 cudnnTensorFormat_t tensor_format, LayerDimension &output_size);
 
 	void allocateSpace(size_t &free_bytes, cudnnHandle_t cudnn_handle, DropoutDescriptor *user_params, long long seed);
+	void deallocateSpace(size_t &free_bytes);
 };
 
 struct BatchNormLayerParams {
@@ -130,6 +132,7 @@ struct BatchNormLayerParams {
 	void initializeValues(BatchNormDescriptor *user_params, cudnnDataType_t data_type, cudnnTensorFormat_t tensor_format, 
 							int batch_size, LayerDimension &output_size, UpdateRule update_rule);
 	void allocateSpace(cudnnDataType_t data_type, size_t data_type_size, size_t &free_bytes);
+	void deallocateSpace(size_t &free_bytes, size_t data_type_size);
 
 	void cnmemAllocDerivatives(size_t data_type_size, cudaStream_t stream);
 	void cnmemAllocDerivativesLocked(NeuralNet *net, size_t data_type_size, cudaStream_t stream);
@@ -151,6 +154,7 @@ struct PoolingLayerParams {
 	void initializeValues(PoolingDescriptor *user_params, cudnnDataType_t data_type, cudnnTensorFormat_t tensor_format, 
 							int batch_size, LayerDimension &output_size);
 	void allocateSpace(size_t &free_bytes);
+	void deallocateSpace(size_t &free_bytes);
 };
 
 struct ActivationLayerParams {
@@ -160,6 +164,7 @@ struct ActivationLayerParams {
 	void initializeValues(ActivationDescriptor *user_params, cudnnDataType_t data_type, cudnnTensorFormat_t tensor_format, 
 							int batch_size, LayerDimension &output_size);
 	void allocateSpace(size_t &free_bytes);
+	void deallocateSpace(size_t &free_bytes);
 };
 
 struct SoftmaxLayerParams {
@@ -172,6 +177,7 @@ struct SoftmaxLayerParams {
 	void initializeValues(SoftmaxDescriptor *user_params, cudnnDataType_t data_type, cudnnTensorFormat_t tensor_format, 
 							int batch_size, LayerDimension &output_size);
 	void allocateSpace(size_t &free_bytes);
+	void deallocateSpace(size_t &free_bytes);
 };
 
 struct RegionLayerParams{
@@ -183,6 +189,8 @@ struct RegionLayerParams{
 	int num;
 	int coords;
 	void initializeValues(RegionDescriptor *user_params, int batch_size, LayerDimension &output_size);
+	void allocateSpace(size_t &free_bytes);
+	void deallocateSpace(size_t &free_bytes);
 };
 
 #endif

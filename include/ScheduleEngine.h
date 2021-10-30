@@ -53,6 +53,8 @@ public:
 	void enqueue(Operation *);
 	Operation *dequeue();
 	void dispatch(Operation *, stream_indicator);
+	void dispatch_new(Operation *, stream_indicator);
+	void dispatch_warmup(Operation *, stream_indicator);
 	void execute(Operation *, stream_indicator);
 	void schedule();
 	void warmup_schedule(InputOperation *zerothLayer);

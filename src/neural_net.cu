@@ -3,7 +3,10 @@
 #include <cstdio>
 #include <string>
 #include "image.h"
+#include <iostream>
+using namespace std;
 extern int pipelines;
+
 
 template <typename T>
 __global__ void softmaxLossBackProp(int *y, T *SO, T *dSO, int batch_size, int output_size, float eps) {
@@ -87,7 +90,7 @@ NeuralNet::NeuralNet(std::vector<LayerSpecifier> &layers, DataType data_type, in
 						long long dropout_seed, float softmax_eps, float init_std_dev, vDNNType vdnn_type, vDNNConvAlgo vdnn_conv_algo, 
 						UpdateRule update_rule, char *filename, char *path) {
 	
-
+	ofstream memPerLayer("memoryPerLayer.txt", ios_base::app);
 	//Set the input file name
 	strcpy(imgpath, path);
 	imgpath[strlen(path)]='\0';
@@ -194,7 +197,6 @@ NeuralNet::NeuralNet(std::vector<LayerSpecifier> &layers, DataType data_type, in
 		else if (layers[i].type == POOLING) {
 			PoolingDescriptor *user_params = (PoolingDescriptor *)layers[i].params;
 			params[i] = malloc(sizeof(BatchNormLayerParams));
-
 			((PoolingLayerParams *)params[i])->initializeValues(user_params, this->data_type, this->tensor_format,batch_size, current_output_size);
 		}
 
@@ -236,73 +238,81 @@ NeuralNet::NeuralNet(std::vector<LayerSpecifier> &layers, DataType data_type, in
 	// ---------------------- vDNN end ------------------------
 	checkCudaErrors(cudaMemGetInfo(&free_bytes, &total_bytes));
 	std::cout << "Free bytes just before allocate space: " << free_bytes << std::endl;
+	
+	
 	// allocate space for parameters
 	// Exception BatchNorm - looks like it will take lots of space if only FC layers - space taken = size of one input
 	for (int i = 0; i < num_layers; i++) {
 		size_t input_size;
 		if (layers[i].type == CONV) {
 			ConvDescriptor *user_params = (ConvDescriptor *)layers[i].params;
-			((ConvLayerParams *)params[i])->allocateSpace(curand_gen, this->data_type, data_type_size, init_std_dev,free_bytes);
+			//-- ((ConvLayerParams *)params[i])->allocateSpace(curand_gen, this->data_type, data_type_size, init_std_dev,free_bytes);
 			input_size = batch_size * user_params->input_channels * user_params->input_h * user_params->input_w;
 			if (i == 0) {
 				input_channels = user_params->input_channels;
 				input_h = user_params->input_h;
 				input_w = user_params->input_w;
 			}
+			memPerLayer << i<<" "<<"CN"<<" "<<input_size<<endl;
 		}
 		else if (layers[i].type == FULLY_CONNECTED) {
 			FCDescriptor *user_params = (FCDescriptor *)layers[i].params;
-			((FCLayerParams *)params[i])->allocateSpace(curand_gen, this->data_type, data_type_size, init_std_dev,free_bytes);
+			//--((FCLayerParams *)params[i])->allocateSpace(curand_gen, this->data_type, data_type_size, init_std_dev,free_bytes);
 			input_size = batch_size * user_params->input_channels;
 			if (i == 0) {
 				input_channels = user_params->input_channels;
 				input_h = 1;
 				input_w = 1;
 			}
+		memPerLayer << i<<" "<<"FC"<<" "<<input_size<<endl;
 		}
 		else if (layers[i].type == DROPOUT) {
 			DropoutDescriptor *user_params = (DropoutDescriptor *)layers[i].params;
-			((DropoutLayerParams *)params[i])->allocateSpace(free_bytes, cudnn_handle, user_params, dropout_seed);
+			//--((DropoutLayerParams *)params[i])->allocateSpace(free_bytes, cudnn_handle, user_params, dropout_seed);
 			input_size = batch_size * user_params->channels * user_params->h * user_params->w;
 			if (i == 0) {
 				input_channels = user_params->channels;
 				input_h = user_params->h;
 				input_w = user_params->w;
 			}
+		memPerLayer << i<<" "<<"DR"<<" "<<input_size<<endl;
 		}
 		else if (layers[i].type == BATCHNORM) {
 			BatchNormDescriptor *user_params = (BatchNormDescriptor *)layers[i].params;
-			((BatchNormLayerParams *)params[i])->allocateSpace(this->data_type, data_type_size,free_bytes);
+			//--((BatchNormLayerParams *)params[i])->allocateSpace(this->data_type, data_type_size,free_bytes);
 			input_size = batch_size * user_params->channels * user_params->h * user_params->w;
 			if (i == 0) {
 				input_channels = user_params->channels;
 				input_h = user_params->h;
 				input_w = user_params->w;
 			}
+			memPerLayer << i<<" "<<"BT"<<" "<<input_size<<endl;
 		}
 		else if (layers[i].type == POOLING) {
 			PoolingDescriptor *user_params = (PoolingDescriptor *)layers[i].params;
-			((PoolingLayerParams *)params[i])->allocateSpace(free_bytes);
+			//--((PoolingLayerParams *)params[i])->allocateSpace(free_bytes);
 			input_size = batch_size * user_params->input_channels * user_params->input_h * user_params->input_w;
 			if (i == 0) {
 				input_channels = user_params->input_channels;
 				input_h = user_params->input_h;
 				input_w = user_params->input_w;
 			}
+			memPerLayer << i<<" "<<"PL"<<" "<<input_size<<endl;
 		}
 		else if (layers[i].type == ACTV) {
 			ActivationDescriptor *user_params = (ActivationDescriptor *)layers[i].params;
-			((ActivationLayerParams *)params[i])->allocateSpace(free_bytes);
+			//--((ActivationLayerParams *)params[i])->allocateSpace(free_bytes);
 			input_size = batch_size * user_params->channels * user_params->h * user_params->w;
 			if (i == 0) {
 				input_channels = user_params->channels;
 				input_h = user_params->h;
 				input_w = user_params->w;
 			}
+			memPerLayer << i<<" "<<"AT" <<" "<< input_size<<endl;
 		}
 		else if (layers[i].type == SOFTMAX) {
 			SoftmaxDescriptor *user_params = (SoftmaxDescriptor *)layers[i].params;
-			((SoftmaxLayerParams *)params[i])->allocateSpace(free_bytes);
+			//--((SoftmaxLayerParams *)params[i])->allocateSpace(free_bytes);
 			input_size = batch_size * user_params->channels * user_params->h * user_params->w;
 
 			// assuming this is last layer, allocate for next layer as well
@@ -317,16 +327,18 @@ NeuralNet::NeuralNet(std::vector<LayerSpecifier> &layers, DataType data_type, in
 			if (i == num_layers - 1) {
 				num_classes = user_params->channels;
 			}
+			memPerLayer << i<<" "<<"SM"<<" "<<input_size<<endl;
 		}
 		else if(layers[i].type == REGION){//updated code
 			RegionDescriptor *user_params = (RegionDescriptor *)layers[i].params;
-			//((SoftmaxLayerParams *)params[i])->allocateSpace(free_bytes);
+			//--((SoftmaxLayerParams *)params[i])->allocateSpace(free_bytes);
 			input_size = batch_size * user_params->channels * user_params->h * user_params->w;
 			if (i == num_layers - 1) {
 				num_classes = user_params->channels;
 				layer_input_size[i+1]= user_params->h * user_params->w * user_params->num *(user_params->classes + user_params->coords +1);
 				//printf("\n\n\n%d layer is REGION layer and its size is %d\n\n\n",i, layer_input_size[i+1]);
 			}
+			memPerLayer << i<<" "<<"RG"<<" "<<input_size<<endl;
 		}
 		// do not allocate memory initially
 		// checkCudaErrors(cudaMalloc(&layer_input[i], input_size * data_type_size));
@@ -336,6 +348,9 @@ NeuralNet::NeuralNet(std::vector<LayerSpecifier> &layers, DataType data_type, in
 		layer_input_size[i] = input_size;
 		// ---------------------- vDNN end ------------------------
 	}
+
+	memPerLayer.close();
+
 	checkCudaErrors(cudaDeviceSynchronize());
 	checkCudaErrors(cudaMemGetInfo(&free_bytes, &total_bytes));
 	std::cout << "Free bytes just after allocate space: " << free_bytes << std::endl;
@@ -393,7 +408,7 @@ NeuralNet::NeuralNet(std::vector<LayerSpecifier> &layers, DataType data_type, in
 	{
 		printf("In cnmen setting up routine, free bytes=%ld\n",free_bytes);
 	cnmemDevice_t cnmem_device;
-	size_t cnmem_stream_memory_size = free_bytes;
+	size_t cnmem_stream_memory_size = free_bytes/2;
 
 	cnmem_device.device = 0;
 	cnmem_device.size = cnmem_stream_memory_size;
@@ -471,22 +486,25 @@ NeuralNet::NeuralNet(std::vector<LayerSpecifier> &layers, DataType data_type, in
 	//--- Close the input weight file
 	//fclose(wfp);
 	
-	//allocate memory to the first layer of neural network
-	lockedcnmemMalloc(&(layer_input[0]), layer_input_size[0] *data_type_size, NULL);
+	//allocate memory to the first layer of neural network==moved to loadFile function
+	//=======lockedcnmemMalloc(&(layer_input[0]), layer_input_size[0] *data_type_size, NULL);
 }//End of NN constructor
 
 
 
 void NeuralNet::prefetchWeights(int layer_no, cudaStream_t &memory_stream){
 
-	printf("Prefetching layer %d \n",layer_no);	
+	//printf("Prefetching layer %d \n",layer_no);	
 	if (layer_type[layer_no]==CONV  )
 	{
+			//First allocate memory for loading weights and then Load weights
 			ConvLayerParams *cur_params = (ConvLayerParams *)params[layer_no];
+			cur_params->allocateSpace(curand_gen, this->data_type, data_type_size, init_std_dev,free_bytes);
 			cur_params->convLoadWeights(data_type_size,wfp, cur_params->bn, memory_stream);
 	}
 	else if (layer_type[layer_no]==FULLY_CONNECTED)
 	{
+			//Allocation of memory need to be implemented
 			FCLayerParams *cur_params = (FCLayerParams *)params[layer_no];
 			cur_params->fcLoadWeights(data_type_size,wfp, memory_stream);
 	}
@@ -508,6 +526,7 @@ void NeuralNet::loadFile(char *imgfname, cudaStream_t &stream){
 	img_w=im.w;
 	printf("Loading image %s of size %d %d ",imgfname, input_w, input_h);
 	image r = letterbox_image(im, input_w,input_h );
+	lockedcnmemMalloc(&(layer_input[0]), layer_input_size[0] *data_type_size, NULL);
 	checkCudaErrors(cudaMemcpyAsync(layer_input[0], r.data, batch_size *input_channels * input_h *input_w * data_type_size, cudaMemcpyHostToDevice, stream));
 	printf("Loading image operation enqued in memory stream\n");
 }
@@ -1203,6 +1222,7 @@ void NeuralNet::lockedcnmemMalloc(void **p, size_t size, cudaStream_t stream) {
 	}
 	checkPMutexErrors(pthread_mutex_unlock(&lock_cnmem_memory));
 }
+
 
 void NeuralNet::lockedcnmemFree(void *p, cudaStream_t stream) {
 	checkPMutexErrors(pthread_mutex_lock(&lock_cnmem_memory));

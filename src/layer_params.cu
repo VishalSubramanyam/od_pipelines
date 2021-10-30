@@ -1,5 +1,9 @@
 #include "layer_params.h"
 #include "neural_net.h"
+#include <iostream>
+using namespace std;
+
+ofstream outfile("mem_profile.txt");
 
 void ConvLayerParams::initializeValues(cudnnHandle_t cudnn_handle, ConvDescriptor *user_params, cudnnDataType_t data_type, 
 									int batch_size, cudnnTensorFormat_t tensor_format, size_t data_type_size, LayerDimension &output_size, 
@@ -128,21 +132,46 @@ void ConvLayerParams::allocateSpace(curandGenerator_t curand_gen, cudnnDataType_
 	checkCudaErrors(cudaMalloc(&scales_gpu, C_out * data_type_size));
 	checkCudaErrors(cudaMalloc(&rolling_mean_gpu, C_out * data_type_size));
 	checkCudaErrors(cudaMalloc(&rolling_variance_gpu, C_out * data_type_size));
-	free_bytes = free_bytes - 2 * (kernel_size + C_out) * data_type_size;
+
+	free_bytes = free_bytes -  (kernel_size + 4*C_out) * data_type_size;
+	outfile<< (kernel_size + 4*C_out) * data_type_size << endl;
+}
+ 
+void ConvLayerParams::deallocateSpace(size_t &free_bytes, size_t data_type_size){
+	//free gpu allocated memory
+	checkCudaErrors(cudaFree(W));
+	checkCudaErrors(cudaFree(b));
+	checkCudaErrors(cudaFree(scales_gpu));
+	checkCudaErrors(cudaFree(rolling_mean_gpu));
+	checkCudaErrors(cudaFree(rolling_variance_gpu));
+	//free host allocated pin memory
+	checkCudaErrors(cudaFreeHost(temp_W));
+	checkCudaErrors(cudaFreeHost(temp_b));
+	checkCudaErrors(cudaFreeHost(scales_cpu));
+	checkCudaErrors(cudaFreeHost(rolling_mean_cpu));
+	checkCudaErrors(cudaFreeHost(rolling_variance_cpu));
+	free_bytes = free_bytes +  (kernel_size + 4*C_out) * data_type_size;
 }
 
 void ConvLayerParams::convLoadWeights(size_t data_type_size, FILE *wfp, int bn, cudaStream_t stream_memory){
 
+	//Allocate temp_W and temp_b array in host memory
+	checkCudaErrors(cudaMallocHost((void **)&temp_W, kernel_size*data_type_size));
+	checkCudaErrors(cudaMallocHost((void **)&temp_b, C_out*data_type_size));
+
 	//Allocate host memeory for scales, rolliing variance and rolling mean
-	float *scales_cpu=(float *)malloc(C_out * data_type_size);
-	float *rolling_mean_cpu=(float *)malloc(C_out * data_type_size);
-	float *rolling_variance_cpu=(float *)malloc(C_out * data_type_size);	
+	checkCudaErrors(cudaMallocHost((void **)&scales_cpu, C_out*data_type_size));
+	checkCudaErrors(cudaMallocHost((void **)&rolling_mean_cpu, C_out*data_type_size));
+	checkCudaErrors(cudaMallocHost((void **)&rolling_variance_cpu, C_out*data_type_size));
+	//float *scales_cpu=(float *)malloc(C_out * data_type_size);
+	//float *rolling_mean_cpu=(float *)malloc(C_out * data_type_size);
+	//float *rolling_variance_cpu=(float *)malloc(C_out * data_type_size);	
 	size_t s1,s2,s3,s4,s5;
 	int nb= C_out;
 	int nW= kernel_size;
-	//Allocate temp_W and temp_b array in hosat memory
-	float *temp_W=(float *) malloc(kernel_size* data_type_size);
-	float *temp_b=(float *) malloc(C_out * data_type_size);
+	
+	//float *temp_W=(float *) malloc(kernel_size* data_type_size);
+	//float *temp_b=(float *) malloc(C_out * data_type_size);
 	//read weights in host arrays
 	//Biase-> scales ->rolling mean ->rolling variance
 	s1=fread(temp_b,sizeof(float),nb,wfp);
@@ -160,21 +189,16 @@ void ConvLayerParams::convLoadWeights(size_t data_type_size, FILE *wfp, int bn, 
 		fprintf(stderr,"Error in the amount of data read from file - weight and biase");
 		exit(0);
 	}*/
+	
 	//copy host array into device array
-	checkCudaErrors(cudaMemcpyAsync(W,temp_W,nW*sizeof(float), cudaMemcpyHostToDevice,stream_memory));
-	checkCudaErrors(cudaMemcpyAsync(b,temp_b,nb*sizeof(float), cudaMemcpyHostToDevice,stream_memory));
-	checkCudaErrors(cudaMemcpyAsync(scales_gpu,scales_cpu,nb*sizeof(float), cudaMemcpyHostToDevice,stream_memory));
-	checkCudaErrors(cudaMemcpyAsync(rolling_mean_gpu,rolling_mean_cpu,nb*sizeof(float), cudaMemcpyHostToDevice,stream_memory));
-	checkCudaErrors(cudaMemcpyAsync(rolling_variance_gpu,rolling_variance_cpu,nb*sizeof(float), cudaMemcpyHostToDevice,stream_memory));
+	checkCudaErrors(cudaMemcpyAsync(W, temp_W, nW*sizeof(float), cudaMemcpyHostToDevice, stream_memory));
+	checkCudaErrors(cudaMemcpyAsync(b,temp_b, nb*sizeof(float), cudaMemcpyHostToDevice,stream_memory));
+	checkCudaErrors(cudaMemcpyAsync(scales_gpu,scales_cpu, nb*sizeof(float), cudaMemcpyHostToDevice,stream_memory));
+	checkCudaErrors(cudaMemcpyAsync(rolling_mean_gpu,rolling_mean_cpu, nb*sizeof(float), cudaMemcpyHostToDevice,stream_memory));
+	checkCudaErrors(cudaMemcpyAsync(rolling_variance_gpu,rolling_variance_cpu, nb*sizeof(float), cudaMemcpyHostToDevice,stream_memory));
+	
 	int total=(4*nb+nW)*data_type_size;
 	printf("CONV Layer:%d bytes read\n",total);
-
-        //Free temp_W and temp_b
-	free(temp_b);
-	free(temp_W);
-	free(scales_cpu);
-	free(rolling_mean_cpu);
-	free(rolling_variance_cpu);
 }
 
 
@@ -449,11 +473,7 @@ void FCLayerParams::allocateSpace(curandGenerator_t curand_gen, cudnnDataType_t 
 	checkCudaErrors(cudaMalloc(&W, wt_alloc_size * data_type_size));
 	checkCudaErrors(cudaMalloc(&b, C_out * data_type_size));
 	fprintf(stderr,"FC: Bias %ld and Weight %ld\n", C_out*data_type_size,wt_alloc_size * data_type_size);
-/*--	if (alloc_derivative) {
-		checkCudaErrors(cudaMalloc(&dW, wt_alloc_size * data_type_size));
-		checkCudaErrors(cudaMalloc(&db, C_out * data_type_size));
-	}
---*/
+
 	if (data_type == CUDNN_DATA_FLOAT) {
 		checkCURAND(curandGenerateNormal(curand_gen, (float *)W, wt_alloc_size, 0, std_dev));
 		fillValue<float><<<ceil(1.0 * C_out / BW), BW>>>((float *)b, C_out, 0);
@@ -462,13 +482,20 @@ void FCLayerParams::allocateSpace(curandGenerator_t curand_gen, cudnnDataType_t 
 		checkCURAND(curandGenerateNormalDouble(curand_gen, (double *)W, wt_alloc_size, 0, std_dev));
 		fillValue<double><<<ceil(1.0 * C_out / BW), BW>>>((double *)b, C_out, 0);
 	}
-	free_bytes = free_bytes - 2 * (C_in * C_out + C_out) * data_type_size;
+	free_bytes = free_bytes - (C_in * C_out + C_out) * data_type_size;
+	outfile<< ( wt_alloc_size + C_out) * data_type_size <<endl;
 }
+
+void FCLayerParams::deallocateSpace(size_t &free_bytes, size_t data_type_size){
+	checkCudaErrors(cudaFree(W));
+	checkCudaErrors(cudaFree(b));
+	free_bytes = free_bytes + (C_in * C_out + C_out) * data_type_size;
+}
+
 
 void FCLayerParams::fcLoadWeights(size_t data_type_size, FILE *wfp, cudaStream_t stream_memory){
 
 //To be written
-
 }
 
 
@@ -576,6 +603,13 @@ void DropoutLayerParams::allocateSpace(size_t &free_bytes, cudnnHandle_t cudnn_h
 	checkCUDNN(cudnnSetDropoutDescriptor(dropout_desc, cudnn_handle, user_params->dropout_value, state, state_size, seed));
 
 	free_bytes = free_bytes - (state_size + reserved_space_size);
+	outfile<<(state_size + reserved_space_size) <<endl;
+}
+
+void DropoutLayerParams::deallocateSpace(size_t &free_bytes){
+	checkCudaErrors(cudaFree(state));
+	checkCudaErrors(cudaFree(reserved_space));
+	free_bytes = free_bytes + (state_size + reserved_space_size);
 }
 
 void BatchNormLayerParams::initializeValues(BatchNormDescriptor *user_params, cudnnDataType_t data_type, cudnnTensorFormat_t tensor_format, 
@@ -639,7 +673,18 @@ void BatchNormLayerParams::allocateSpace(cudnnDataType_t data_type, size_t data_
 		fillValue<double><<<ceil(1.0 * allocation_size / BW), BW>>>((double *)bias, allocation_size, 1);
 	}
 	free_bytes = free_bytes - 6 * allocation_size_bytes;
+	outfile<< 6 * allocation_size_bytes;
+}
 
+void BatchNormLayerParams::deallocateSpace(size_t &free_bytes, size_t data_type_size){
+	size_t allocation_size_bytes = allocation_size * data_type_size;
+	checkCudaErrors(cudaFree(scale));
+	checkCudaErrors(cudaFree(bias));
+	checkCudaErrors(cudaFree(running_mean));
+	checkCudaErrors(cudaFree(running_variance));
+	checkCudaErrors(cudaFree(result_save_mean));
+	checkCudaErrors(cudaFree(result_save_inv_var));
+	free_bytes = free_bytes + 6 * allocation_size_bytes;
 }
 
 void BatchNormLayerParams::cnmemAllocDerivatives(size_t data_type_size, cudaStream_t stream) {
@@ -747,6 +792,12 @@ void PoolingLayerParams::allocateSpace(size_t &free_bytes) {
 
 }
 
+void PoolingLayerParams::deallocateSpace(size_t &free_bytes) {
+
+}
+
+
+
 void ActivationLayerParams::initializeValues(ActivationDescriptor *user_params, cudnnDataType_t data_type,
 											cudnnTensorFormat_t tensor_format, int batch_size, LayerDimension &output_size) {
 	checkCUDNN(cudnnCreateTensorDescriptor(&input_tensor));
@@ -773,6 +824,10 @@ void ActivationLayerParams::initializeValues(ActivationDescriptor *user_params, 
 }
 
 void ActivationLayerParams::allocateSpace(size_t &free_bytes) {
+	
+}
+
+void ActivationLayerParams::deallocateSpace(size_t &free_bytes) {
 	
 }
 
@@ -803,6 +858,11 @@ void SoftmaxLayerParams::initializeValues(SoftmaxDescriptor *user_params, cudnnD
 void SoftmaxLayerParams::allocateSpace(size_t &free_bytes) {
 
 }
+
+void SoftmaxLayerParams::deallocateSpace(size_t &free_bytes) {
+
+}
+
 void RegionLayerParams::initializeValues(RegionDescriptor *user_params, int batch_sz, LayerDimension &output_size){
 	batch_size=batch_sz;
 	channels=user_params->channels;
@@ -815,4 +875,12 @@ void RegionLayerParams::initializeValues(RegionDescriptor *user_params, int batc
 	//printf("Init valuues in param : batch is %d", batch_size);
 	//printf("REGION layer: %d %d %d %d %d\n", user_params->channels, user_params->h, user_params->w, user_params->num, user_params->classes);
 	output_size.N = batch_sz, output_size.C = user_params->channels, output_size.H = user_params->h, output_size.W = user_params->w;	
+}
+
+void RegionLayerParams::allocateSpace(size_t &free_bytes) {
+
+}
+
+void RegionLayerParams::deallocateSpace(size_t &free_bytes) {
+
 }
